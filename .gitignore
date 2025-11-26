@@ -35,6 +35,10 @@
 /storage/app/public/*
 !/storage/app/public/.gitkeep
 
+# Pero SÍ trackear feature resources (logos, seeds, etc)
+!app/Features/*/resources/
+!app/Features/*/resources/**
+
 /storage/framework/cache/*
 !/storage/framework/cache/.gitkeep
 !/storage/framework/cache/data/
@@ -82,7 +86,7 @@ database/*.sqlite-journal
 coverage/
 .phpunit.result.cache
 .phpunit.cache
-phpunit.xml
+# phpunit.xml is NOT ignored - it's a configuration file that should be committed
 .php_cs.cache
 .php-cs-fixer.cache
 
@@ -168,7 +172,6 @@ yarn-error.log*
 # -----------------------------------------------------------------------------
 /auth.json
 .phpunit.result.cache
-.env.testing
 
 # Laravel Telescope (if installed)
 storage/telescope/
@@ -195,5 +198,16 @@ npm-debug.log
 # -----------------------------------------------------------------------------
 # Custom Application Files (adjust as needed)
 # -----------------------------------------------------------------------------
-# Add your custom ignored files here
-# Example: /storage/app/custom-uploads/*
+NUL
+CON
+PRN
+AUX
+LPT1
+LPT2
+LPT3
+COM1
+COM2
+COM3
+nul
+C\357\200\272/
+"C\357\200\272/"

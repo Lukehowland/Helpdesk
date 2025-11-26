@@ -1,148 +1,863 @@
-# 🏢 COMPANY MANAGEMENT FEATURE - DOCUMENTACIÓN COMPLETA
+# 📘 COMPANY MANAGEMENT API V9.0 - DOCUMENTACIÓN COMPLETA
 
-## 🎯 OVERVIEW DEL FEATURE
-
-El **CompanyManagement Feature** es fundamental para la arquitectura multi-tenant del sistema Helpdesk. Gestiona empresas, solicitudes de registro, configuración corporativa y validación de contextos empresariales para roles de agentes y administradores.
-
-### 🏗️ ARQUITECTURA DEL FEATURE
-
-```
-CompanyManagement/
-├── Services/           # Lógica de negocio empresarial
-│   ├── CompanyService.php
-│   ├── CompanyRequestService.php
-│   └── CompanyConfigService.php
-├── GraphQL/           # API Layer
-├── Models/            # Company, CompanyRequest
-├── Events/            # Eventos empresariales
-└── Tests/             # Tests específicos
-```
-
-### 🎭 TIPOS DE USUARIOS Y ACCESOS
-
-1. **Usuario Público**: Puede ver empresas públicas y solicitar registro
-2. **Platform Admin**: Gestión completa de empresas y solicitudes
-3. **Company Admin**: Gestión de su propia empresa
-4. **Agent**: Acceso de solo lectura a info de su empresa
-5. **User**: Puede seguir empresas y crear tickets
+> Sistema Helpdesk Multi-Tenant
+> Feature: Company Management
+> Schema Version: 9.0 (Sistema de Emails y Contraseñas Temporales)
+> Última actualización: 26 de Octubre, 2025
 
 ---
 
-## 📖 QUERIES - OPERACIONES DE LECTURA
+## 📑 TABLA DE CONTENIDOS
 
-### 1. PUBLIC_COMPANIES - Empresas Públicas
+1. [Introducción](#introducción)
+2. [Arquitectura](#arquitectura)
+3. [Sistema de Emails y Contraseñas Temporales](#sistema-de-emails-y-contraseñas-temporales)
+4. [Queries](#queries)
+5. [Mutations](#mutations)
+6. [Types](#types)
+7. [Enums e Inputs](#enums-e-inputs)
+8. [Permisos y Autenticación](#permisos-y-autenticación)
+9. [Códigos de Error](#códigos-de-error)
+10. [Rate Limiting](#rate-limiting)
+11. [Casos de Uso](#casos-de-uso)
 
-**Descripción**: Lista de empresas públicas disponibles para registro de usuarios y creación de tickets. No requiere autenticación.
+---
+
+## 🎯 INTRODUCCIÓN
+
+### Propósito del Feature
+El **Company Management Feature** gestiona empresas en el sistema Helpdesk multi-tenant, permitiendo:
+- Creación y administración de empresas
+- Sistema de seguimiento de empresas por usuarios
+- Solicitudes públicas de nuevas empresas
+- Gestión de permisos y contextos empresariales
+
+### Características Principales
+✅ **Sin loops infinitos**: Arquitectura optimizada para GraphQL
+✅ **Queries contextuales**: Una query principal con contextos inteligentes
+✅ **Performance optimizado**: Contadores en lugar de listas, caché eficiente
+✅ **Multi-tenant**: Aislamiento completo entre empresas
+✅ **Sistema de seguimiento**: Usuarios pueden seguir empresas de interés
+✅ **Sistema de emails profesional**: Event → Listener → Job → Mail → Queue
+✅ **Contraseñas temporales**: Generación automática para nuevos admins (16 chars, expira 7 días)
+✅ **Responses profesionales**: Mensajes descriptivos en español, campos limitados por seguridad
+
+---
+
+## 🏗️ ARQUITECTURA
+
+### Filosofía del Diseño
+
+#### ❌ Problema: Loops Infinitos (V8.0 - V8.2)
+```graphql
+# ANTIGUO - CAUSA LOOPS
+type Company {
+    admin: User  # User tiene roles: [Role]
+                 # Role tiene company: Company
+                 # LOOP INFINITO ♾️
+
+    followers: [User!]!  # Carga N usuarios
+    agents: [User!]!     # Carga M usuarios
+}
+```
+
+#### ✅ Solución: Campos Planos + Contadores (V8.3)
+```graphql
+# ACTUAL - SIN LOOPS
+type Company {
+    # Admin como campos individuales
+    adminId: UUID!
+    adminName: String!
+    adminEmail: Email!
+    adminAvatar: URL
+
+    # Contadores en lugar de listas
+    followersCount: Int!
+    activeAgentsCount: Int!
+}
+```
+
+### Query Principal con Contextos
+
+En lugar de 9 queries redundantes, usamos **una query principal con contextos**:
 
 ```graphql
-query PublicCompanies(
-    $search: String
-    $activeOnly: Boolean = true
-    $first: Int = 20
-) {
-    publicCompanies(
-        search: $search
-        activeOnly: $activeOnly
-        first: $first
-    ) {
-        id
-        companyCode
-        name
-        supportEmail
-        website
-        logoUrl
-        description
-        industry
-        city
-        country
-        acceptsPublicUsers
-        businessHoursDisplay
+companies(context: CompanyQueryContext!)
+```
+
+**Contextos disponibles:**
+- `MINIMAL`: Para selectores (4 campos)
+- `EXPLORE`: Para explorar empresas (11 campos)
+- `MANAGEMENT`: Para administración (todos los campos)
+- `ANALYTICS`: Para dashboards con estadísticas
+
+---
+
+## 📧 SISTEMA DE EMAILS Y CONTRASEÑAS TEMPORALES
+
+### Filosofía del Sistema
+
+El sistema de aprobación/rechazo de solicitudes de empresas implementa un **flujo profesional de notificaciones por email** con dos escenarios distintos:
+
+1. **Usuario Admin Ya Existe**: Se le asigna rol de COMPANY_ADMIN y recibe email de confirmación (sin contraseña)
+2. **Usuario Admin Nuevo**: Se crea cuenta con contraseña temporal y recibe email con credenciales
+3. **Solicitud Rechazada**: Se envía email con la razón del rechazo
+
+### Arquitectura del Sistema de Emails
+
+El sistema sigue el patrón profesional **Event → Listener → Job → Mail → Queue** implementado en el Authentication Feature:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    MUTATION EJECUTADA                    │
+│              (Approve/Reject Company Request)            │
+└────────────────────┬────────────────────────────────────┘
+                     │
+                     ▼
+         ┌──────────────────────┐
+         │  Event Disparado      │
+         │  - CompanyRequest     │
+         │    Approved/Rejected  │
+         └──────────┬────────────┘
+                    │
+                    ▼
+         ┌──────────────────────┐
+         │  Listener Escucha     │
+         │  - SendCompanyEmail   │
+         │    Notification       │
+         └──────────┬────────────┘
+                    │
+                    ▼
+         ┌──────────────────────┐
+         │  Job Encolado         │
+         │  - Queue: 'emails'    │
+         │  - Retry: 3 veces     │
+         └──────────┬────────────┘
+                    │
+                    ▼
+         ┌──────────────────────┐
+         │  Mail Enviado         │
+         │  - Mailpit (dev)      │
+         │  - SMTP (prod)        │
+         └───────────────────────┘
+```
+
+### Sistema de Contraseñas Temporales
+
+#### Características
+
+- **Longitud**: 16 caracteres alfanuméricos seguros (generados con `Str::random(16)`)
+- **Expiración**: 7 días desde la creación
+- **Seguridad**: Hash con bcrypt antes de almacenar
+- **Campos en DB**:
+  - `has_temporary_password` (boolean): Marca si el usuario debe cambiar su contraseña
+  - `temporary_password_expires_at` (timestamp): Fecha de expiración
+
+#### Flujo de Contraseña Temporal
+
+```
+┌──────────────────────────────────────────────────┐
+│ 1. Admin aprueba solicitud                       │
+│    - admin_email NO existe en sistema            │
+└────────────────┬─────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────┐
+│ 2. UserService::createFromCompanyRequest()       │
+│    - Genera password temporal (16 chars)         │
+│    - Hash con bcrypt                             │
+│    - Sets has_temporary_password = true          │
+│    - Sets temporary_password_expires_at = +7d    │
+│    - Returns ['user' => $user, 'password' => $p] │
+└────────────────┬─────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────┐
+│ 3. CompanyRequestApproved Event                  │
+│    - Lleva la contraseña temporal (plain text)   │
+│    - Solo para nuevos usuarios (null si existe)  │
+└────────────────┬─────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────┐
+│ 4. SendCompanyApprovalEmailJob                   │
+│    - Detecta si temporaryPassword != null        │
+│    - Envía CompanyApprovalMailForNewUser         │
+│    - Email incluye contraseña en texto plano     │
+└────────────────┬─────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────┐
+│ 5. Usuario recibe email con credenciales         │
+│    - Email: admin@company.com                    │
+│    - Password temporal: XyZ123abc...             │
+│    - Link de login al sistema                    │
+│    - Instrucción de cambiar contraseña           │
+└──────────────────────────────────────────────────┘
+```
+
+### Clases de Email Implementadas
+
+#### 1. CompanyApprovalMailForNewUser
+
+**Ubicación**: `app/Features/CompanyManagement/Mail/CompanyApprovalMailForNewUser.php`
+
+**Propósito**: Notificar aprobación a nuevos usuarios con contraseña temporal
+
+**Contenido del Email**:
+```
+Asunto: ✅ Bienvenido a Helpdesk - Solicitud de Empresa Aprobada
+
+¡Bienvenido {displayName}!
+
+Tu solicitud para crear la empresa "{company_name}" ha sido APROBADA.
+
+Credenciales de Acceso:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Email: {admin_email}
+Contraseña Temporal: {temporaryPassword}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ IMPORTANTE: Esta contraseña es temporal y expira en 7 días.
+Deberás cambiarla al iniciar sesión por primera vez.
+
+[Iniciar Sesión] → {loginUrl}
+
+Datos de tu Empresa:
+- Código: {company_code}
+- Nombre: {company_name}
+- Rol Asignado: Administrador de Empresa
+```
+
+**Templates**:
+- HTML: `resources/views/emails/company/approval-new-user.blade.php`
+- Texto plano: `resources/views/emails/company/approval-new-user-text.blade.php`
+
+---
+
+#### 2. CompanyApprovalMailForExistingUser
+
+**Ubicación**: `app/Features/CompanyManagement/Mail/CompanyApprovalMailForExistingUser.php`
+
+**Propósito**: Notificar aprobación a usuarios existentes (sin contraseña)
+
+**Contenido del Email**:
+```
+Asunto: ✅ Nueva Empresa Asignada - Solicitud Aprobada
+
+¡Hola {displayName}!
+
+Tu solicitud para crear la empresa "{company_name}" ha sido APROBADA.
+
+Como ya tienes una cuenta en nuestro sistema, hemos asignado el
+rol de Administrador de Empresa a tu cuenta existente.
+
+Datos de tu Nueva Empresa:
+- Código: {company_code}
+- Nombre: {company_name}
+- Rol Asignado: Administrador de Empresa
+
+Puedes iniciar sesión con tus credenciales actuales:
+[Iniciar Sesión] → {loginUrl}
+```
+
+**Templates**:
+- HTML: `resources/views/emails/company/approval-existing-user.blade.php`
+- Texto plano: `resources/views/emails/company/approval-existing-user-text.blade.php`
+
+---
+
+#### 3. CompanyRejectionMail
+
+**Ubicación**: `app/Features/CompanyManagement/Mail/CompanyRejectionMail.php`
+
+**Propósito**: Notificar rechazo de solicitud con razón
+
+**Contenido del Email**:
+```
+Asunto: ❌ Solicitud de Empresa Rechazada - {requestCode}
+
+Estimado/a,
+
+Lamentamos informarte que tu solicitud para crear la empresa
+"{company_name}" ha sido RECHAZADA.
+
+Código de Solicitud: {requestCode}
+
+Razón del Rechazo:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{reason}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Puedes enviar una nueva solicitud corrigiendo los aspectos
+mencionados.
+
+Si tienes dudas, contáctanos a: {supportEmail}
+```
+
+**Templates**:
+- HTML: `resources/views/emails/company/rejection.blade.php`
+- Texto plano: `resources/views/emails/company/rejection-text.blade.php`
+
+---
+
+### Jobs de Email
+
+#### SendCompanyApprovalEmailJob
+
+**Ubicación**: `app/Features/CompanyManagement/Jobs/SendCompanyApprovalEmailJob.php`
+
+**Configuración**:
+```php
+public int $tries = 3;          // 3 intentos en caso de fallo
+public int $timeout = 30;       // 30 segundos de timeout
+public string $queue = 'emails'; // Cola de alta prioridad
+```
+
+**Lógica**:
+```php
+public function handle(): void
+{
+    if ($this->temporaryPassword) {
+        // Usuario NUEVO - envía con contraseña
+        Mail::to($this->adminUser->email)->send(
+            new CompanyApprovalMailForNewUser(
+                $this->company,
+                $this->adminUser,
+                $this->temporaryPassword
+            )
+        );
+    } else {
+        // Usuario EXISTENTE - sin contraseña
+        Mail::to($this->adminUser->email)->send(
+            new CompanyApprovalMailForExistingUser(
+                $this->company,
+                $this->adminUser
+            )
+        );
     }
 }
 ```
 
-**Variables de Ejemplo**:
-```json
+---
+
+#### SendCompanyRejectionEmailJob
+
+**Ubicación**: `app/Features/CompanyManagement/Jobs/SendCompanyRejectionEmailJob.php`
+
+**Configuración**: Igual que approval (3 tries, 30s timeout, cola 'emails')
+
+**Lógica**:
+```php
+public function handle(): void
 {
-    "search": "universidad",
-    "activeOnly": true,
-    "first": 10
+    Mail::to($this->request->admin_email)->send(
+        new CompanyRejectionMail(
+            $this->request,
+            $this->reason
+        )
+    );
 }
 ```
 
-**Respuesta de Ejemplo**:
+---
+
+### Configuración del Sistema
+
+#### Cola de Emails
+
+**Redis Queue**: `emails` (alta prioridad)
+
+**Worker Configuration** (`queue` service en Docker):
+```bash
+php artisan queue:work redis \
+    --queue=emails,default \
+    --verbose \
+    --tries=3 \
+    --timeout=90
+```
+
+**Prioridad de Colas**:
+1. `emails` - Emails críticos (verificación, passwords, aprobaciones)
+2. `default` - Jobs estándar del sistema
+
+---
+
+#### Mailpit (Development)
+
+**Configuración** (`.env`):
+```env
+MAIL_MAILER=smtp
+MAIL_HOST=mailpit
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_FROM_ADDRESS=noreply@helpdesk.local
+MAIL_FROM_NAME="Helpdesk System"
+```
+
+**Acceso**:
+- SMTP: `mailpit:1025` (desde containers)
+- UI: `http://localhost:8025` (desde browser)
+
+---
+
+### Eventos Disparados
+
+#### CompanyRequestApproved
+
+**Ubicación**: `app/Features/CompanyManagement/Events/CompanyRequestApproved.php`
+
+**Constructor**:
+```php
+public function __construct(
+    public CompanyRequest $request,
+    public Company $company,
+    public User $adminUser,
+    public ?string $temporaryPassword = null  // ⚠️ Null para usuarios existentes
+) {}
+```
+
+**Listeners**:
+- `SendCompanyApprovalEmailNotification` → Dispara `SendCompanyApprovalEmailJob`
+
+---
+
+#### CompanyRequestRejected
+
+**Ubicación**: `app/Features/CompanyManagement/Events/CompanyRequestRejected.php`
+
+**Constructor**:
+```php
+public function __construct(
+    public CompanyRequest $request,
+    public string $reason
+) {}
+```
+
+**Listeners**:
+- `SendCompanyRejectionEmailNotification` → Dispara `SendCompanyRejectionEmailJob`
+
+---
+
+### Horario Laboral por Defecto
+
+Cuando se crea una empresa (ya sea por aprobación o creación directa), si no se especifica `business_hours`, se aplica el **horario laboral estándar**:
+
+```json
+{
+    "monday": {"open": "09:00", "close": "18:00", "is_open": true},
+    "tuesday": {"open": "09:00", "close": "18:00", "is_open": true},
+    "wednesday": {"open": "09:00", "close": "18:00", "is_open": true},
+    "thursday": {"open": "09:00", "close": "18:00", "is_open": true},
+    "friday": {"open": "09:00", "close": "18:00", "is_open": true},
+    "saturday": {"open": "09:00", "close": "13:00", "is_open": false},
+    "sunday": {"is_open": false}
+}
+```
+
+**Implementación**: `CompanyService::create()`
+
+---
+
+### Testing del Sistema de Emails
+
+#### Tests Implementados
+
+**ApproveCompanyRequestMutationTest.php** (9 tests de email):
+- ✅ `sends_approval_email_when_user_already_exists`
+- ✅ `sends_approval_email_with_temporary_password_for_new_user`
+- ✅ `new_user_can_login_with_temporary_password`
+- ✅ `temporary_password_expires_after_configured_time`
+- ✅ `approval_email_is_sent_to_correct_queue`
+- ✅ `approval_email_contains_company_information`
+- ✅ `multiple_companies_can_be_approved_without_email_conflicts`
+- ✅ `email_is_sent_via_mailpit_in_development`
+
+**RejectCompanyRequestMutationTest.php** (6 tests de email):
+- ✅ `sends_rejection_email_with_reason`
+- ✅ `rejection_email_is_sent_to_correct_queue`
+- ✅ `rejection_email_contains_request_information`
+- ✅ `rejection_reason_is_included_in_email`
+- ✅ `rejection_email_is_sent_via_mailpit`
+
+#### Helper Methods para Mailpit
+
+```php
+protected function isMailpitAvailable(): bool
+{
+    try {
+        $response = \Illuminate\Support\Facades\Http::get('http://localhost:8025/api/v1/messages');
+        return $response->successful();
+    } catch (\Exception $e) {
+        return false;
+    }
+}
+
+protected function clearMailpit(): void
+{
+    \Illuminate\Support\Facades\Http::delete('http://localhost:8025/api/v1/messages');
+}
+
+protected function getMailpitMessages(): array
+{
+    $response = \Illuminate\Support\Facades\Http::get('http://localhost:8025/api/v1/messages');
+    return $response->json('messages') ?? [];
+}
+```
+
+---
+
+### Monitoreo y Debugging
+
+#### Ver Logs de Jobs
+
+```bash
+# Ver logs del worker de cola
+docker compose logs -f queue
+
+# Ver todos los emails enviados (Mailpit UI)
+# Navegar a http://localhost:8025
+```
+
+#### Verificar Estado de Cola
+
+```bash
+# Ver jobs pendientes en Redis
+docker compose exec redis redis-cli
+> LLEN queues:emails
+
+# Ver jobs fallidos
+php artisan queue:failed
+```
+
+#### Reintentar Jobs Fallidos
+
+```bash
+# Reintentar todos los jobs fallidos
+php artisan queue:retry all
+
+# Reintentar job específico
+php artisan queue:retry {job-id}
+```
+
+---
+
+## 🔍 QUERIES
+
+### 1. `companies` - Query Principal Contextual
+
+**Descripción**: Query principal que adapta los campos devueltos según el contexto solicitado.
+
+**Firma:**
+```graphql
+companies(
+    context: CompanyQueryContext!
+    filters: CompanyFilters
+    search: String
+    page: Int = 1
+    first: Int = 20
+): CompanyQueryResult!
+```
+
+**Parámetros:**
+
+| Parámetro | Tipo | Requerido | Default | Descripción |
+|-----------|------|-----------|---------|-------------|
+| `context` | `CompanyQueryContext` | ✅ Sí | - | Define qué campos se devuelven |
+| `filters` | `CompanyFilters` | ❌ No | `null` | Filtros de búsqueda |
+| `search` | `String` | ❌ No | `null` | Búsqueda de texto libre |
+| `page` | `Int` | ❌ No | `1` | Número de página |
+| `first` | `Int` | ❌ No | `20` | Registros por página |
+
+**Directivas:**
+- `@field`: `CompaniesQuery` resolver
+- `@cache`: TTL 300s, key dinámica por contexto
+
+---
+
+#### 📋 CASO 1: Contexto MINIMAL (Selectores)
+
+**Uso:** Selectores simples para crear tickets, navbar de contexto.
+
+**Request:**
+```graphql
+query CompaniesForTickets {
+    companies(context: MINIMAL, first: 50) {
+        ... on CompanyMinimalList {
+            items {
+                id
+                companyCode
+                name
+                logoUrl
+            }
+            totalCount
+            hasNextPage
+        }
+    }
+}
+```
+
+**Response:**
 ```json
 {
     "data": {
-        "publicCompanies": [
-            {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "companyCode": "CMP-2025-00001",
-                "name": "Universidad del Valle",
-                "supportEmail": "soporte@univalle.edu.bo",
-                "website": "https://univalle.edu.bo",
-                "logoUrl": "https://storage.helpdesk.com/logos/univalle.png",
-                "description": "Universidad privada líder en Bolivia",
-                "industry": "Educación Superior",
-                "city": "Cochabamba",
-                "country": "Bolivia",
-                "acceptsPublicUsers": true,
-                "businessHoursDisplay": "Lunes a Viernes: 8:00 - 18:00"
-            },
-            {
-                "id": "550e8400-e29b-41d4-a716-446655440001",
-                "companyCode": "CMP-2025-00002",
-                "name": "Empresa Tech Solutions",
-                "supportEmail": "help@techsolutions.bo",
-                "website": "https://techsolutions.bo",
-                "logoUrl": "https://storage.helpdesk.com/logos/techsolutions.png",
-                "description": "Soluciones tecnológicas innovadoras",
-                "industry": "Tecnología",
-                "city": "Santa Cruz",
-                "country": "Bolivia",
-                "acceptsPublicUsers": true,
-                "businessHoursDisplay": "24/7 - Soporte continuo"
-            }
-        ]
+        "companies": {
+            "items": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440001",
+                    "companyCode": "CMP-2025-00001",
+                    "name": "Tech Solutions Inc.",
+                    "logoUrl": "https://cdn.example.com/logos/tech-solutions.png"
+                },
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440002",
+                    "companyCode": "CMP-2025-00002",
+                    "name": "Digital Innovations Corp.",
+                    "logoUrl": "https://cdn.example.com/logos/digital-innovations.png"
+                }
+            ],
+            "totalCount": 127,
+            "hasNextPage": true
+        }
     }
 }
 ```
 
-**Casos de Uso**:
-- Selector de empresa en formulario de tickets
-- Directorio público de empresas
-- Página de registro donde elegir empresa
-- Marketplace de servicios
+**Performance:**
+- ⚡ Solo carga 4 campos por empresa
+- ⚡ Cache de 5 minutos
+- ⚡ Ideal para selectores con cientos de empresas
 
 ---
 
-### 2. COMPANY - Empresa Específica
+#### 📋 CASO 2: Contexto EXPLORE (Explorar y Seguir)
 
-**Descripción**: Obtiene información completa de una empresa específica. Requiere permisos de acceso.
+**Uso:** Página de "Explorar Empresas", onboarding de usuario.
 
+**Request:**
 ```graphql
-query Company($id: UUID!) {
+query ExploreCompanies($filters: CompanyFilters, $search: String) {
+    companies(
+        context: EXPLORE
+        filters: $filters
+        search: $search
+        first: 20
+    ) {
+        ... on CompanyExploreList {
+            items {
+                id
+                companyCode
+                name
+                logoUrl
+                description
+                industry
+                city
+                country
+                primaryColor
+                followersCount
+                isFollowedByMe
+            }
+            totalCount
+            hasNextPage
+        }
+    }
+}
+```
+
+**Variables:**
+```json
+{
+    "filters": {
+        "industry": "Technology",
+        "country": "Bolivia"
+    },
+    "search": "software"
+}
+```
+
+**Response:**
+```json
+{
+    "data": {
+        "companies": {
+            "items": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440001",
+                    "companyCode": "CMP-2025-00001",
+                    "name": "Tech Solutions Inc.",
+                    "logoUrl": "https://cdn.example.com/logos/tech-solutions.png",
+                    "description": "Soluciones tecnológicas innovadoras para empresas",
+                    "industry": "Technology",
+                    "city": "Santa Cruz",
+                    "country": "Bolivia",
+                    "primaryColor": "#3B82F6",
+                    "followersCount": 1247,
+                    "isFollowedByMe": false
+                },
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440003",
+                    "companyCode": "CMP-2025-00003",
+                    "name": "SoftDev Solutions",
+                    "logoUrl": "https://cdn.example.com/logos/softdev.png",
+                    "description": "Desarrollo de software a medida",
+                    "industry": "Technology",
+                    "city": "La Paz",
+                    "country": "Bolivia",
+                    "primaryColor": "#10B981",
+                    "followersCount": 856,
+                    "isFollowedByMe": true
+                }
+            ],
+            "totalCount": 23,
+            "hasNextPage": true
+        }
+    }
+}
+```
+
+**Casos de Uso:**
+- Página de exploración de empresas
+- Selector de empresas en onboarding
+- Directorio público de empresas
+
+---
+
+#### 📋 CASO 3: Contexto MANAGEMENT (Administración)
+
+**Uso:** Panel administrativo, gestión completa de empresas.
+
+**Request:**
+```graphql
+query ManageCompanies($filters: CompanyFilters, $page: Int) {
+    companies(
+        context: MANAGEMENT
+        filters: $filters
+        page: $page
+        first: 15
+    ) {
+        ... on CompanyFullList {
+            items {
+                id
+                companyCode
+                name
+                legalName
+                status
+                supportEmail
+                website
+                contactCity
+                contactCountry
+                adminId
+                adminName
+                adminEmail
+                activeAgentsCount
+                totalUsersCount
+                totalTicketsCount
+                openTicketsCount
+                followersCount
+                createdAt
+                updatedAt
+            }
+            totalCount
+            hasNextPage
+        }
+    }
+}
+```
+
+**Variables:**
+```json
+{
+    "filters": {
+        "status": "ACTIVE",
+        "hasActiveTickets": true
+    },
+    "page": 1
+}
+```
+
+**Response:**
+```json
+{
+    "data": {
+        "companies": {
+            "items": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440001",
+                    "companyCode": "CMP-2025-00001",
+                    "name": "Tech Solutions Inc.",
+                    "legalName": "Tech Solutions Incorporated SRL",
+                    "status": "ACTIVE",
+                    "supportEmail": "support@techsolutions.com",
+                    "website": "https://techsolutions.com",
+                    "contactCity": "Santa Cruz",
+                    "contactCountry": "Bolivia",
+                    "adminId": "660e8400-e29b-41d4-a716-446655440010",
+                    "adminName": "Carlos Mendoza",
+                    "adminEmail": "carlos@techsolutions.com",
+                    "activeAgentsCount": 5,
+                    "totalUsersCount": 234,
+                    "totalTicketsCount": 1567,
+                    "openTicketsCount": 23,
+                    "followersCount": 1247,
+                    "createdAt": "2024-01-15T10:30:00Z",
+                    "updatedAt": "2025-10-01T14:22:00Z"
+                }
+            ],
+            "totalCount": 45,
+            "hasNextPage": true
+        }
+    }
+}
+```
+
+**Permisos:**
+- ✅ `PLATFORM_ADMIN`: Ve todas las empresas
+- ✅ `COMPANY_ADMIN`: Solo ve su empresa
+
+---
+
+### 2. `company` - Detalle Completo de Empresa
+
+**Descripción**: Obtiene toda la información de una empresa específica.
+
+**Firma:**
+```graphql
+company(id: UUID!): Company
+```
+
+**Directivas:**
+- `@auth`: Requiere autenticación
+- `@can(ability: "view", model: "Company", find: "id")`: Valida permisos
+
+**Request:**
+```graphql
+query GetCompany($id: UUID!) {
     company(id: $id) {
+        # Identificadores
         id
         companyCode
+
+        # Información básica
         name
         legalName
         supportEmail
         phone
         website
 
-        # Información de contacto
+        # Contacto
         contactAddress
         contactCity
         contactState
         contactCountry
         contactPostalCode
 
-        # Información legal
+        # Legal
         taxId
         legalRepresentative
 
-        # Configuración operativa
+        # Configuración
         businessHours
         timezone
 
@@ -156,14 +871,13 @@ query Company($id: UUID!) {
         status
         settings
 
-        # Relaciones
-        admin {
-            id
-            displayName
-            email
-        }
+        # Admin (sin loops)
+        adminId
+        adminName
+        adminEmail
+        adminAvatar
 
-        # Estadísticas (evita loops infinitos)
+        # Estadísticas
         activeAgentsCount
         totalUsersCount
         totalTicketsCount
@@ -171,234 +885,246 @@ query Company($id: UUID!) {
         averageRating
         categoriesCount
         macrosCount
+        followersCount
+
+        # Contextuales
+        isFollowedByMe
 
         # Auditoría
         createdAt
         updatedAt
-        originRequest {
-            id
-            requestCode
-        }
     }
 }
 ```
 
-**Variables**:
+**Variables:**
 ```json
 {
-    "id": "550e8400-e29b-41d4-a716-446655440000"
+    "id": "550e8400-e29b-41d4-a716-446655440001"
 }
 ```
 
-**Respuesta de Ejemplo**:
+**Response:**
 ```json
 {
     "data": {
         "company": {
-            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "id": "550e8400-e29b-41d4-a716-446655440001",
             "companyCode": "CMP-2025-00001",
-            "name": "Universidad del Valle",
-            "legalName": "Universidad del Valle S.R.L.",
-            "supportEmail": "soporte@univalle.edu.bo",
-            "phone": "+591 4 4232323",
-            "website": "https://univalle.edu.bo",
-            "contactAddress": "Av. España #123, Zona Central",
-            "contactCity": "Cochabamba",
-            "contactState": "Cochabamba",
+            "name": "Tech Solutions Inc.",
+            "legalName": "Tech Solutions Incorporated SRL",
+            "supportEmail": "support@techsolutions.com",
+            "phone": "+59133224455",
+            "website": "https://techsolutions.com",
+            "contactAddress": "Av. San Martín 123, Piso 5",
+            "contactCity": "Santa Cruz de la Sierra",
+            "contactState": "Santa Cruz",
             "contactCountry": "Bolivia",
             "contactPostalCode": "0000",
-            "taxId": "1234567890",
-            "legalRepresentative": "Dr. Carlos Mendoza",
+            "taxId": "123456789",
+            "legalRepresentative": "Carlos Mendoza García",
             "businessHours": {
                 "monday": {"open": "08:00", "close": "18:00"},
                 "tuesday": {"open": "08:00", "close": "18:00"},
                 "wednesday": {"open": "08:00", "close": "18:00"},
                 "thursday": {"open": "08:00", "close": "18:00"},
                 "friday": {"open": "08:00", "close": "18:00"},
-                "saturday": {"open": "08:00", "close": "12:00"}
+                "saturday": null,
+                "sunday": null
             },
             "timezone": "America/La_Paz",
-            "logoUrl": "https://storage.helpdesk.com/logos/univalle.png",
-            "faviconUrl": "https://storage.helpdesk.com/favicons/univalle.ico",
-            "primaryColor": "#1e40af",
-            "secondaryColor": "#64748b",
+            "logoUrl": "https://cdn.example.com/logos/tech-solutions.png",
+            "faviconUrl": "https://cdn.example.com/favicons/tech-solutions.ico",
+            "primaryColor": "#3B82F6",
+            "secondaryColor": "#1E40AF",
             "status": "ACTIVE",
             "settings": {
-                "allowPublicTickets": true,
                 "autoAssignTickets": true,
-                "requireEmailVerification": false
+                "allowPublicTickets": true,
+                "requireEmailVerification": false,
+                "enableSLA": true
             },
-            "admin": {
-                "id": "admin-001",
-                "displayName": "Admin Universidad",
-                "email": "admin@univalle.edu.bo"
-            },
-            "activeAgentsCount": 12,
-            "totalUsersCount": 145,
-            "totalTicketsCount": 1247,
+            "adminId": "660e8400-e29b-41d4-a716-446655440010",
+            "adminName": "Carlos Mendoza",
+            "adminEmail": "carlos@techsolutions.com",
+            "adminAvatar": "https://cdn.example.com/avatars/carlos.jpg",
+            "activeAgentsCount": 5,
+            "totalUsersCount": 234,
+            "totalTicketsCount": 1567,
             "openTicketsCount": 23,
-            "averageRating": 4.3,
-            "categoriesCount": 8,
-            "macrosCount": 15,
-            "createdAt": "2025-01-15T10:00:00Z",
-            "updatedAt": "2025-09-20T14:30:00Z",
-            "originRequest": {
-                "id": "req-001",
-                "requestCode": "REQ-2025-00001"
-            }
+            "averageRating": 4.7,
+            "categoriesCount": 12,
+            "macrosCount": 8,
+            "followersCount": 1247,
+            "isFollowedByMe": true,
+            "createdAt": "2024-01-15T10:30:00Z",
+            "updatedAt": "2025-10-01T14:22:00Z"
         }
     }
 }
 ```
 
-**Casos de Uso**:
-- Página de detalle de empresa
-- Panel de configuración empresarial
-- Validación de contexto para agentes
-- Información para branding dinámico
+**Errores Posibles:**
+```json
+{
+    "errors": [
+        {
+            "message": "Empresa no encontrada",
+            "extensions": {
+                "code": "COMPANY_NOT_FOUND",
+                "companyId": "550e8400-e29b-41d4-a716-446655440999"
+            }
+        }
+    ]
+}
+```
 
 ---
 
-### 3. MY_COMPANIES - Mis Empresas
+### 3. `myFollowedCompanies` - Empresas que Sigo
 
-**Descripción**: Lista las empresas donde el usuario autenticado tiene roles activos.
+**Descripción**: Lista de empresas que el usuario autenticado está siguiendo, con estadísticas personales.
 
+**Firma:**
 ```graphql
-query MyCompanies {
-    myCompanies {
+myFollowedCompanies: [CompanyFollowInfo!]!
+```
+
+**Directivas:**
+- `@auth`: Requiere autenticación
+
+**Request:**
+```graphql
+query MyFollowedCompanies {
+    myFollowedCompanies {
         id
-        companyCode
-        name
-        logoUrl
-        primaryColor
-        status
+        company {
+            id
+            companyCode
+            name
+            logoUrl
+        }
+        followedAt
+        myTicketsCount
+        lastTicketCreatedAt
+        hasUnreadAnnouncements
     }
 }
 ```
 
-**Respuesta de Ejemplo**:
+**Response:**
 ```json
 {
     "data": {
-        "myCompanies": [
+        "myFollowedCompanies": [
             {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "companyCode": "CMP-2025-00001",
-                "name": "Universidad del Valle",
-                "logoUrl": "https://storage.helpdesk.com/logos/univalle.png",
-                "primaryColor": "#1e40af",
-                "status": "ACTIVE"
+                "id": "770e8400-e29b-41d4-a716-446655440020",
+                "company": {
+                    "id": "550e8400-e29b-41d4-a716-446655440001",
+                    "companyCode": "CMP-2025-00001",
+                    "name": "Tech Solutions Inc.",
+                    "logoUrl": "https://cdn.example.com/logos/tech-solutions.png"
+                },
+                "followedAt": "2024-08-10T09:15:00Z",
+                "myTicketsCount": 12,
+                "lastTicketCreatedAt": "2025-09-28T11:30:00Z",
+                "hasUnreadAnnouncements": true
             },
             {
-                "id": "550e8400-e29b-41d4-a716-446655440001",
-                "companyCode": "CMP-2025-00002",
-                "name": "Empresa Tech Solutions",
-                "logoUrl": "https://storage.helpdesk.com/logos/techsolutions.png",
-                "primaryColor": "#dc2626",
-                "status": "ACTIVE"
+                "id": "770e8400-e29b-41d4-a716-446655440021",
+                "company": {
+                    "id": "550e8400-e29b-41d4-a716-446655440003",
+                    "companyCode": "CMP-2025-00003",
+                    "name": "SoftDev Solutions",
+                    "logoUrl": "https://cdn.example.com/logos/softdev.png"
+                },
+                "followedAt": "2025-02-14T14:22:00Z",
+                "myTicketsCount": 3,
+                "lastTicketCreatedAt": "2025-03-05T16:45:00Z",
+                "hasUnreadAnnouncements": false
             }
         ]
     }
 }
 ```
 
-**Casos de Uso**:
+**Casos de Uso:**
+- Dashboard personal
+- Página "Mis empresas"
 - Selector de contexto empresarial
-- Dashboard de usuario con múltiples roles
-- Navegación entre empresas
-- Validación de permisos
 
 ---
 
-### 4. COMPANIES - Lista Completa (Admin)
+### 4. `isFollowingCompany` - Verificar Seguimiento
 
-**Descripción**: Lista paginada de todas las empresas del sistema. Solo para platform admins.
+**Descripción**: Verifica rápidamente si el usuario actual está siguiendo una empresa específica.
 
+**Firma:**
 ```graphql
-query Companies(
-    $filters: CompanyFilters
-    $orderBy: [CompanyOrderBy!]
-    $page: Int = 1
-    $first: Int = 15
-) {
-    companies(
-        filters: $filters
-        orderBy: $orderBy
-        page: $page
-        first: $first
-    ) {
-        data {
-            id
-            companyCode
-            name
-            supportEmail
-            status
-            admin {
-                displayName
-                email
-            }
-            activeAgentsCount
-            totalTicketsCount
-            averageRating
-            createdAt
-        }
-        paginatorInfo {
-            total
-            perPage
-            currentPage
-            lastPage
-            hasMorePages
-        }
+isFollowingCompany(companyId: UUID!): Boolean!
+```
+
+**Directivas:**
+- `@auth`: Requiere autenticación
+
+**Request:**
+```graphql
+query IsFollowing($companyId: UUID!) {
+    isFollowingCompany(companyId: $companyId)
+}
+```
+
+**Variables:**
+```json
+{
+    "companyId": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Response (Siguiendo):**
+```json
+{
+    "data": {
+        "isFollowingCompany": true
     }
 }
 ```
 
-**Variables con Filtros**:
+**Response (No Siguiendo):**
 ```json
 {
-    "filters": {
-        "search": "universidad",
-        "status": "ACTIVE",
-        "industry": "Educación",
-        "country": "Bolivia",
-        "recentActivity": true,
-        "createdBetween": {
-            "from": "2025-01-01T00:00:00Z",
-            "to": "2025-12-31T23:59:59Z"
-        }
-    },
-    "orderBy": [
-        {
-            "field": "CREATED_AT",
-            "order": "DESC"
-        }
-    ],
-    "page": 1,
-    "first": 25
+    "data": {
+        "isFollowingCompany": false
+    }
 }
 ```
 
-**Casos de Uso**:
-- Panel de administración de plataforma
-- Gestión masiva de empresas
-- Análisis y reportes administrativos
-- Monitoreo de actividad empresarial
+**Casos de Uso:**
+- Mostrar botón "Seguir" vs "Siguiendo"
+- Validaciones en UI
+- Conditional rendering
 
 ---
 
-### 5. COMPANY_REQUESTS - Solicitudes Pendientes
+### 5. `companyRequests` - Solicitudes de Empresas
 
-**Descripción**: Lista de solicitudes de empresa pendientes de aprobación. Solo para platform admins.
+**Descripción**: Lista de solicitudes pendientes/aprobadas/rechazadas de nuevas empresas. Solo para administradores de plataforma.
 
+**Firma:**
 ```graphql
-query CompanyRequests(
-    $status: CompanyRequestStatus
-    $first: Int = 15
-) {
-    companyRequests(
-        status: $status
-        first: $first
-    ) {
+companyRequests(
+    status: CompanyRequestStatus
+    first: Int = 15
+): [CompanyRequest!]!
+```
+
+**Directivas:**
+- `@auth(requires: [PLATFORM_ADMIN])`: Solo administradores
+
+**Request:**
+```graphql
+query CompanyRequests($status: CompanyRequestStatus) {
+    companyRequests(status: $status, first: 20) {
         id
         requestCode
         companyName
@@ -408,87 +1134,220 @@ query CompanyRequests(
         website
         industryType
         estimatedUsers
-
-        # Información de contacto
         contactAddress
         contactCity
         contactCountry
-        taxId
-
-        # Estado de solicitud
         status
-        reviewedBy {
-            displayName
-        }
+        reviewedById
+        reviewedByName
         reviewedAt
         rejectionReason
-        createdCompany {
-            id
-            name
-            companyCode
-        }
-
-        # Auditoría
+        createdCompanyId
+        createdCompanyName
         createdAt
         updatedAt
     }
 }
 ```
 
-**Variables**:
+**Variables (Pendientes):**
 ```json
 {
-    "status": "PENDING",
-    "first": 20
+    "status": "PENDING"
 }
 ```
 
-**Respuesta de Ejemplo**:
+**Response:**
 ```json
 {
     "data": {
         "companyRequests": [
             {
-                "id": "req-001",
-                "requestCode": "REQ-2025-00003",
-                "companyName": "Consultoría Legal Pérez",
-                "legalName": "Consultoría Legal Pérez & Asociados S.R.L.",
-                "adminEmail": "admin@legaleperez.bo",
-                "businessDescription": "Consultoría legal especializada en derecho empresarial y tributario con más de 15 años de experiencia en el mercado boliviano.",
-                "website": "https://legalperez.bo",
-                "industryType": "Servicios Legales",
-                "estimatedUsers": 25,
-                "contactAddress": "Av. Ballivián #456, Zona Sur",
-                "contactCity": "La Paz",
+                "id": "880e8400-e29b-41d4-a716-446655440030",
+                "requestCode": "REQ-2025-00042",
+                "companyName": "Innovación Digital SRL",
+                "legalName": "Innovación Digital Sociedad de Responsabilidad Limitada",
+                "adminEmail": "admin@innovaciondigital.bo",
+                "businessDescription": "Empresa dedicada al desarrollo de software personalizado y consultoría tecnológica para PyMEs en Bolivia. Contamos con más de 5 años de experiencia en el mercado local.",
+                "website": "https://innovaciondigital.bo",
+                "industryType": "Technology",
+                "estimatedUsers": 50,
+                "contactAddress": "Calle Comercio 456",
+                "contactCity": "Cochabamba",
                 "contactCountry": "Bolivia",
-                "taxId": "9876543210",
                 "status": "PENDING",
-                "reviewedBy": null,
+                "reviewedById": null,
+                "reviewedByName": null,
                 "reviewedAt": null,
                 "rejectionReason": null,
-                "createdCompany": null,
-                "createdAt": "2025-09-20T15:30:00Z",
-                "updatedAt": "2025-09-20T15:30:00Z"
+                "createdCompanyId": null,
+                "createdCompanyName": null,
+                "createdAt": "2025-10-02T08:30:00Z",
+                "updatedAt": "2025-10-02T08:30:00Z"
             }
         ]
     }
 }
 ```
 
-**Casos de Uso**:
-- Panel de revisión de solicitudes
-- Proceso de aprobación empresarial
-- Auditoría de nuevas empresas
-- Gestión de cola de solicitudes
+---
+
+## ✏️ MUTATIONS
+
+### 1. `followCompany` - Seguir Empresa
+
+**Descripción**: Permite a un usuario autenticado seguir una empresa.
+
+**Firma:**
+```graphql
+followCompany(companyId: UUID!): CompanyFollowResult!
+```
+
+**Directivas:**
+- `@auth`: Requiere autenticación
+- `@audit(action: "follow_company")`: Auditoría
+
+**Request:**
+```graphql
+mutation FollowCompany($companyId: UUID!) {
+    followCompany(companyId: $companyId) {
+        success
+        message
+        company {
+            id
+            companyCode
+            name
+            logoUrl
+        }
+        followedAt
+    }
+}
+```
+
+**Variables:**
+```json
+{
+    "companyId": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Response (Éxito):**
+```json
+{
+    "data": {
+        "followCompany": {
+            "success": true,
+            "message": "Ahora sigues a Tech Solutions Inc.",
+            "company": {
+                "id": "550e8400-e29b-41d4-a716-446655440001",
+                "companyCode": "CMP-2025-00001",
+                "name": "Tech Solutions Inc.",
+                "logoUrl": "https://cdn.example.com/logos/tech-solutions.png"
+            },
+            "followedAt": "2025-10-03T10:45:00Z"
+        }
+    }
+}
+```
+
+**Errores Posibles:**
+```json
+{
+    "errors": [
+        {
+            "message": "Ya estás siguiendo esta empresa",
+            "extensions": {
+                "code": "ALREADY_FOLLOWING",
+                "companyId": "550e8400-e29b-41d4-a716-446655440001"
+            }
+        }
+    ]
+}
+```
+
+```json
+{
+    "errors": [
+        {
+            "message": "Has alcanzado el límite de empresas que puedes seguir (50)",
+            "extensions": {
+                "code": "MAX_FOLLOWS_EXCEEDED",
+                "currentFollows": 50,
+                "maxAllowed": 50
+            }
+        }
+    ]
+}
+```
 
 ---
 
-## ✏️ MUTATIONS - OPERACIONES DE ESCRITURA
+### 2. `unfollowCompany` - Dejar de Seguir
 
-### 1. REQUEST_COMPANY - Solicitar Nueva Empresa
+**Descripción**: Permite a un usuario dejar de seguir una empresa.
 
-**Descripción**: Solicitud pública para crear una nueva empresa. No requiere autenticación.
+**Firma:**
+```graphql
+unfollowCompany(companyId: UUID!): Boolean!
+```
 
+**Directivas:**
+- `@auth`: Requiere autenticación
+- `@audit(action: "unfollow_company")`: Auditoría
+
+**Request:**
+```graphql
+mutation UnfollowCompany($companyId: UUID!) {
+    unfollowCompany(companyId: $companyId)
+}
+```
+
+**Variables:**
+```json
+{
+    "companyId": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Response (Éxito):**
+```json
+{
+    "data": {
+        "unfollowCompany": true
+    }
+}
+```
+
+**Errores Posibles:**
+```json
+{
+    "errors": [
+        {
+            "message": "No estás siguiendo esta empresa",
+            "extensions": {
+                "code": "NOT_FOLLOWING",
+                "companyId": "550e8400-e29b-41d4-a716-446655440001"
+            }
+        }
+    ]
+}
+```
+
+---
+
+### 3. `requestCompany` - Solicitar Nueva Empresa
+
+**Descripción**: Solicitud pública para crear una nueva empresa. No requiere autenticación. Genera solicitud para revisión por administradores.
+
+**Firma:**
+```graphql
+requestCompany(input: CompanyRequestInput!): CompanyRequest!
+```
+
+**Directivas:**
+- `@rateLimit(max: 3, window: 3600)`: Máximo 3 solicitudes por hora
+
+**Request:**
 ```graphql
 mutation RequestCompany($input: CompanyRequestInput!) {
     requestCompany(input: $input) {
@@ -502,167 +1361,293 @@ mutation RequestCompany($input: CompanyRequestInput!) {
 }
 ```
 
-**Input Variables**:
+**Variables:**
 ```json
 {
     "input": {
-        "companyName": "Consultoría Legal Pérez",
-        "legalName": "Consultoría Legal Pérez & Asociados S.R.L.",
-        "adminEmail": "admin@legalperez.bo",
-        "businessDescription": "Consultoría legal especializada en derecho empresarial y tributario con más de 15 años de experiencia en el mercado boliviano. Ofrecemos servicios integrales de asesoramiento legal para empresas de todos los tamaños.",
-        "website": "https://legalperez.bo",
-        "industryType": "Servicios Legales",
-        "estimatedUsers": 25,
-        "contactAddress": "Av. Ballivián #456, Zona Sur",
-        "contactCity": "La Paz",
+        "companyName": "Innovación Digital SRL",
+        "legalName": "Innovación Digital Sociedad de Responsabilidad Limitada",
+        "adminEmail": "admin@innovaciondigital.bo",
+        "businessDescription": "Empresa dedicada al desarrollo de software personalizado y consultoría tecnológica para PyMEs en Bolivia. Contamos con más de 5 años de experiencia en el mercado local, ofreciendo soluciones innovadoras que impulsan la transformación digital.",
+        "website": "https://innovaciondigital.bo",
+        "industryType": "Technology",
+        "estimatedUsers": 50,
+        "contactAddress": "Calle Comercio 456",
+        "contactCity": "Cochabamba",
         "contactCountry": "Bolivia",
         "contactPostalCode": "0000",
-        "taxId": "9876543210"
+        "taxId": "987654321"
     }
 }
 ```
 
-**Validaciones del Input**:
-- `companyName`: Requerido, 2-200 caracteres
-- `adminEmail`: Requerido, formato email válido
-- `businessDescription`: Requerido, 50-1000 caracteres
-- `industryType`: Requerido, máximo 100 caracteres
-- `estimatedUsers`: Opcional, entre 1 y 10,000
-- `website`: Opcional, URL válida
-- `taxId`: Opcional, máximo 50 caracteres
+**Input Validations:**
 
-**Respuesta de Ejemplo**:
+| Campo | Validación |
+|-------|------------|
+| `companyName` | Required, min:2, max:200 |
+| `legalName` | Optional, max:250 |
+| `adminEmail` | Required, email válido |
+| `businessDescription` | Required, min:50, max:1000 |
+| `website` | Optional, URL válida |
+| `industryType` | Required, max:100 |
+| `estimatedUsers` | Optional, min:1, max:10000 |
+| `contactAddress` | Optional, max:500 |
+| `taxId` | Optional, max:50 |
+
+**Response:**
 ```json
 {
     "data": {
         "requestCompany": {
-            "id": "550e8400-e29b-41d4-a716-446655440010",
-            "requestCode": "REQ-2025-00003",
-            "companyName": "Consultoría Legal Pérez",
-            "adminEmail": "admin@legalperez.bo",
+            "id": "880e8400-e29b-41d4-a716-446655440031",
+            "requestCode": "REQ-2025-00043",
+            "companyName": "Innovación Digital SRL",
+            "adminEmail": "admin@innovaciondigital.bo",
             "status": "PENDING",
-            "createdAt": "2025-09-21T16:45:00Z"
+            "createdAt": "2025-10-03T11:00:00Z"
         }
     }
 }
 ```
 
-**Flujo Post-Solicitud**:
-1. Solicitud creada con status "PENDING"
-2. Email de confirmación enviado al solicitante
-3. Notificación a platform admins para revisión
-4. Solicitud aparece en cola de revisión
+**Errores Posibles:**
+```json
+{
+    "errors": [
+        {
+            "message": "Ya existe una solicitud pendiente con este email",
+            "extensions": {
+                "code": "REQUEST_ALREADY_EXISTS",
+                "email": "admin@innovaciondigital.bo"
+            }
+        }
+    ]
+}
+```
 
-**Rate Limiting**:
-- Máximo 3 solicitudes por hora por IP
-- Validación de email único por solicitud
+```json
+{
+    "errors": [
+        {
+            "message": "Solo 3 solicitudes por hora",
+            "extensions": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "retryAfter": 1800
+            }
+        }
+    ]
+}
+```
 
 ---
 
-### 2. APPROVE_COMPANY_REQUEST - Aprobar Solicitud
+### 4. `approveCompanyRequest` - Aprobar Solicitud
 
-**Descripción**: Aprueba una solicitud de empresa y crea automáticamente la empresa y admin. Solo platform admins.
+**Descripción**: Aprueba una solicitud y crea automáticamente la empresa. Solo administradores de plataforma. Retorna una respuesta profesional con mensaje descriptivo y datos limitados.
 
+**Firma:**
 ```graphql
-mutation ApproveCompanyRequest($requestId: UUID!) {
+approveCompanyRequest(requestId: UUID!): CompanyRequestApprovalResponse!
+```
+
+**Directivas:**
+- `@jwt(requires: [PLATFORM_ADMIN])`: Solo admins
+- `@audit(action: "company_request_approve", includePayload: true)`: Auditoría completa
+
+**Request:**
+```graphql
+mutation ApproveRequest($requestId: UUID!) {
     approveCompanyRequest(requestId: $requestId) {
-        id
-        companyCode
-        name
-        status
-        admin {
+        success
+        message
+        company {
             id
-            email
-            displayName
+            companyCode
+            name
+            legalName
+            status
+            adminId
+            adminEmail
+            adminName
+            createdAt
         }
-        createdAt
+        newUserCreated
+        notificationSentTo
     }
 }
 ```
 
-**Variables**:
+**Variables:**
 ```json
 {
-    "requestId": "550e8400-e29b-41d4-a716-446655440010"
+    "requestId": "880e8400-e29b-41d4-a716-446655440030"
 }
 ```
 
-**Respuesta de Ejemplo**:
+**Response (Usuario Nuevo - Con Contraseña Temporal):**
 ```json
 {
     "data": {
         "approveCompanyRequest": {
-            "id": "550e8400-e29b-41d4-a716-446655440020",
-            "companyCode": "CMP-2025-00003",
-            "name": "Consultoría Legal Pérez",
-            "status": "ACTIVE",
-            "admin": {
-                "id": "user-admin-003",
-                "email": "admin@legalperez.bo",
-                "displayName": "Admin Legal Pérez"
+            "success": true,
+            "message": "Solicitud aprobada exitosamente. Se ha creado la empresa 'Innovación Digital SRL' y se envió un email con las credenciales de acceso a admin@innovaciondigital.bo.",
+            "company": {
+                "id": "550e8400-e29b-41d4-a716-446655440010",
+                "companyCode": "CMP-2025-00010",
+                "name": "Innovación Digital SRL",
+                "legalName": "Innovación Digital Sociedad de Responsabilidad Limitada",
+                "status": "ACTIVE",
+                "adminId": "660e8400-e29b-41d4-a716-446655440050",
+                "adminEmail": "admin@innovaciondigital.bo",
+                "adminName": "Admin Usuario",
+                "createdAt": "2025-10-26T11:30:00Z"
             },
-            "createdAt": "2025-09-21T17:00:00Z"
+            "newUserCreated": true,
+            "notificationSentTo": "admin@innovaciondigital.bo"
         }
     }
 }
 ```
 
-**Proceso Automático de Aprobación**:
-1. **Actualizar solicitud**: Status cambia a "APPROVED"
-2. **Crear empresa**: Nueva empresa con datos de la solicitud
-3. **Verificar admin**:
-   - Si email existe: Asignar rol "COMPANY_ADMIN"
-   - Si no existe: Crear usuario + rol automáticamente
-4. **Generar códigos**: Company code único (CMP-YYYY-NNNNN)
-5. **Configuración inicial**: Categorías y macros por defecto
-6. **Notificaciones**: Email al admin con credenciales y acceso
-
-**Auditoría**:
-- Registro completo de quién aprobó y cuándo
-- Link entre solicitud original y empresa creada
-- Log de acciones automatizadas
-
----
-
-### 3. REJECT_COMPANY_REQUEST - Rechazar Solicitud
-
-**Descripción**: Rechaza una solicitud de empresa con motivo. Solo platform admins.
-
-```graphql
-mutation RejectCompanyRequest($requestId: UUID!, $reason: String!) {
-    rejectCompanyRequest(requestId: $requestId, reason: $reason)
-}
-```
-
-**Variables**:
-```json
-{
-    "requestId": "550e8400-e29b-41d4-a716-446655440010",
-    "reason": "La descripción del negocio no es suficientemente clara y no se proporciona información válida de contacto. Por favor, proporcione más detalles sobre los servicios que ofrece y verifique la información de contacto."
-}
-```
-
-**Respuesta**:
+**Response (Usuario Existente - Sin Contraseña):**
 ```json
 {
     "data": {
-        "rejectCompanyRequest": true
+        "approveCompanyRequest": {
+            "success": true,
+            "message": "Solicitud aprobada exitosamente. Se ha creado la empresa 'Tech Solutions Inc.' y se asignó el rol de administrador al usuario existente.",
+            "company": {
+                "id": "550e8400-e29b-41d4-a716-446655440011",
+                "companyCode": "CMP-2025-00011",
+                "name": "Tech Solutions Inc.",
+                "legalName": null,
+                "status": "ACTIVE",
+                "adminId": "660e8400-e29b-41d4-a716-446655440055",
+                "adminEmail": "existing@user.com",
+                "adminName": "Juan Pérez",
+                "createdAt": "2025-10-26T11:35:00Z"
+            },
+            "newUserCreated": false,
+            "notificationSentTo": "existing@user.com"
+        }
     }
 }
 ```
 
-**Proceso de Rechazo**:
-1. **Actualizar solicitud**: Status "REJECTED" + motivo
-2. **Registrar auditoría**: Quién rechazó y por qué
-3. **Notificar solicitante**: Email con motivo del rechazo
-4. **Permitir reenvío**: Solicitante puede corregir y reenviar
+**Proceso Automático:**
+1. ✅ Valida que la solicitud esté PENDING
+2. ✅ Verifica si admin_email existe en sistema
+3. ✅ **Si usuario NO existe**:
+   - Crea usuario con contraseña temporal (16 chars, expira en 7 días)
+   - Marca `has_temporary_password = true`
+   - Envía `CompanyApprovalMailForNewUser` con credenciales
+4. ✅ **Si usuario SÍ existe**:
+   - Reutiliza usuario existente
+   - Envía `CompanyApprovalMailForExistingUser` sin contraseña
+5. ✅ Crea empresa con business_hours por defecto (Lun-Vie 9-18)
+6. ✅ Asigna rol COMPANY_ADMIN al usuario
+7. ✅ Marca solicitud como APPROVED
+8. ✅ Dispara evento CompanyRequestApproved
+9. ✅ Encola email en cola 'emails' (alta prioridad)
+10. ✅ Registra evento de auditoría
+
+**⚠️ IMPORTANTE - Campos NO Expuestos:**
+
+Por seguridad y profesionalismo, la respuesta **NO incluye**:
+- ❌ `business_hours` (configuración interna)
+- ❌ `settings` (configuración interna)
+- ❌ `timezone` (configuración interna)
+- ❌ Contraseña temporal (solo va por email)
+
+Solo se devuelven campos esenciales para confirmar la operación.
 
 ---
 
-### 4. CREATE_COMPANY - Crear Empresa Directamente
+### 5. `rejectCompanyRequest` - Rechazar Solicitud
 
-**Descripción**: Crea una empresa directamente sin proceso de solicitud. Solo platform admins.
+**Descripción**: Rechaza una solicitud con una razón específica. Solo administradores. Retorna una respuesta profesional con mensaje descriptivo.
 
+**Firma:**
+```graphql
+rejectCompanyRequest(
+    requestId: UUID!
+    reason: String! @rules(apply: ["required", "min:3"])
+): CompanyRequestRejectionResponse!
+```
+
+**Directivas:**
+- `@jwt(requires: [PLATFORM_ADMIN])`: Solo admins
+- `@audit(action: "company_request_reject", includePayload: true)`: Auditoría completa
+
+**Request:**
+```graphql
+mutation RejectRequest($requestId: UUID!, $reason: String!) {
+    rejectCompanyRequest(requestId: $requestId, reason: $reason) {
+        success
+        message
+        reason
+        notificationSentTo
+        requestCode
+    }
+}
+```
+
+**Variables:**
+```json
+{
+    "requestId": "880e8400-e29b-41d4-a716-446655440030",
+    "reason": "La descripción del negocio no proporciona suficiente información sobre los servicios ofrecidos. Por favor, reenvíe la solicitud con más detalles sobre su modelo de negocio y servicios específicos."
+}
+```
+
+**Response:**
+```json
+{
+    "data": {
+        "rejectCompanyRequest": {
+            "success": true,
+            "message": "La solicitud de empresa 'Innovación Digital SRL' ha sido rechazada. Se ha enviado un email a admin@innovaciondigital.bo con la razón del rechazo.",
+            "reason": "La descripción del negocio no proporciona suficiente información sobre los servicios ofrecidos. Por favor, reenvíe la solicitud con más detalles sobre su modelo de negocio y servicios específicos.",
+            "notificationSentTo": "admin@innovaciondigital.bo",
+            "requestCode": "REQ-2025-00042"
+        }
+    }
+}
+```
+
+**Proceso Automático:**
+1. ✅ Valida que la solicitud esté PENDING
+2. ✅ Guarda datos antes del rechazo (código, nombre, email)
+3. ✅ Marca solicitud como REJECTED
+4. ✅ Guarda razón de rechazo en la solicitud
+5. ✅ Dispara evento CompanyRequestRejected
+6. ✅ Encola email en cola 'emails' (alta prioridad)
+7. ✅ Envía `CompanyRejectionMail` con la razón
+8. ✅ Registra evento de auditoría
+
+**Validaciones:**
+- `reason` es requerido y debe tener al menos 3 caracteres
+- La solicitud debe estar en estado PENDING
+- Solo PLATFORM_ADMIN puede ejecutar esta mutación
+
+---
+
+### 6. `createCompany` - Crear Empresa Directamente
+
+**Descripción**: Crea una empresa directamente sin proceso de solicitud. Solo administradores de plataforma.
+
+**Firma:**
+```graphql
+createCompany(input: CreateCompanyInput!): Company!
+```
+
+**Directivas:**
+- `@auth(requires: [PLATFORM_ADMIN])`: Solo admins
+- `@audit(action: "create_company", includePayload: true)`: Auditoría completa
+- `@rateLimit(max: 10, window: 3600)`: Máximo 10 empresas por hora
+
+**Request:**
 ```graphql
 mutation CreateCompany($input: CreateCompanyInput!) {
     createCompany(input: $input) {
@@ -670,346 +1655,675 @@ mutation CreateCompany($input: CreateCompanyInput!) {
         companyCode
         name
         status
-        admin {
-            displayName
-            email
-        }
+        adminId
+        adminName
         createdAt
     }
 }
 ```
 
-**Input Variables**:
+**Variables:**
 ```json
 {
     "input": {
-        "name": "Empresa Test Directa",
-        "legalName": "Empresa Test Directa S.A.",
-        "adminUserId": "550e8400-e29b-41d4-a716-446655440000",
-        "supportEmail": "soporte@test.com",
-        "phone": "+591 70123456",
-        "website": "https://test.com",
+        "name": "Enterprise Solutions Corp",
+        "legalName": "Enterprise Solutions Corporation SRL",
+        "adminUserId": "660e8400-e29b-41d4-a716-446655440999",
+        "supportEmail": "support@enterprise-solutions.com",
+        "phone": "+59133445566",
+        "website": "https://enterprise-solutions.com",
         "contactInfo": {
-            "address": "Calle Test #123",
+            "address": "Av. Empresarial 789",
             "city": "Santa Cruz",
             "state": "Santa Cruz",
             "country": "Bolivia",
             "postalCode": "0000",
-            "taxId": "1111111111",
-            "legalRepresentative": "Juan Test"
+            "taxId": "456789123",
+            "legalRepresentative": "María González"
         },
         "initialConfig": {
             "businessHours": {
-                "monday": {"open": "09:00", "close": "17:00"},
-                "tuesday": {"open": "09:00", "close": "17:00"},
-                "wednesday": {"open": "09:00", "close": "17:00"},
-                "thursday": {"open": "09:00", "close": "17:00"},
+                "monday": {"open": "09:00", "close": "18:00"},
+                "tuesday": {"open": "09:00", "close": "18:00"},
+                "wednesday": {"open": "09:00", "close": "18:00"},
+                "thursday": {"open": "09:00", "close": "18:00"},
                 "friday": {"open": "09:00", "close": "17:00"}
             },
             "timezone": "America/La_Paz"
-        },
-        "branding": {
-            "primaryColor": "#3b82f6",
-            "secondaryColor": "#64748b"
         }
     }
 }
 ```
 
-**Casos de Uso**:
-- Crear empresas para testing
-- Migración de datos
-- Configuración inicial del sistema
-- Casos especiales sin solicitud pública
+**Response:**
+```json
+{
+    "data": {
+        "createCompany": {
+            "id": "550e8400-e29b-41d4-a716-446655440011",
+            "companyCode": "CMP-2025-00011",
+            "name": "Enterprise Solutions Corp",
+            "status": "ACTIVE",
+            "adminId": "660e8400-e29b-41d4-a716-446655440999",
+            "adminName": "María González",
+            "createdAt": "2025-10-03T12:00:00Z"
+        }
+    }
+}
+```
 
 ---
 
-### 5. UPDATE_COMPANY - Actualizar Empresa
+### 7. `updateCompany` - Actualizar Empresa
 
-**Descripción**: Actualiza información de una empresa existente. Company admin o platform admin.
+**Descripción**: Actualiza información de una empresa existente.
 
+**Firma:**
+```graphql
+updateCompany(id: UUID!, input: UpdateCompanyInput!): Company!
+```
+
+**Directivas:**
+- `@auth(requires: [PLATFORM_ADMIN, COMPANY_ADMIN])`: Admins o admin de la empresa
+- `@can(ability: "update", model: "Company", find: "id")`: Valida permisos
+- `@audit(action: "update_company", includePayload: true)`: Auditoría completa
+
+**Request:**
 ```graphql
 mutation UpdateCompany($id: UUID!, $input: UpdateCompanyInput!) {
     updateCompany(id: $id, input: $input) {
         id
         name
-        legalName
         supportEmail
         website
         primaryColor
-        secondaryColor
         updatedAt
     }
 }
 ```
 
-**Input Variables**:
+**Variables:**
 ```json
 {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "id": "550e8400-e29b-41d4-a716-446655440001",
     "input": {
-        "name": "Universidad del Valle - Campus Norte",
-        "supportEmail": "soporte.norte@univalle.edu.bo",
-        "website": "https://norte.univalle.edu.bo",
-        "contactInfo": {
-            "address": "Av. Norte #789, Zona Norte",
-            "city": "Cochabamba",
-            "phone": "+591 4 4567890"
-        },
+        "supportEmail": "soporte@techsolutions.com",
+        "website": "https://www.techsolutions.com",
         "branding": {
-            "primaryColor": "#1e40af",
-            "secondaryColor": "#3730a3"
+            "primaryColor": "#2563EB",
+            "secondaryColor": "#1E3A8A"
+        },
+        "config": {
+            "settings": {
+                "autoAssignTickets": false,
+                "allowPublicTickets": true
+            }
         }
     }
 }
 ```
 
-**Permisos**:
-- **Platform Admin**: Puede modificar cualquier empresa
-- **Company Admin**: Solo su propia empresa
-- **Validación**: Verificación automática de permisos por directiva @can
-
----
-
-### 6. SUSPEND_COMPANY - Suspender Empresa
-
-**Descripción**: Suspende temporalmente una empresa. Solo platform admins.
-
-```graphql
-mutation SuspendCompany($id: UUID!, $reason: String!) {
-    suspendCompany(id: $id, reason: $reason) {
-        id
-        status
-        updatedAt
-    }
-}
-```
-
-**Variables**:
+**Response:**
 ```json
 {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "reason": "Incumplimiento de términos de servicio - uso excesivo de recursos"
-}
-```
-
-**Efectos de Suspensión**:
-1. **Cambiar status** a "SUSPENDED"
-2. **Desactivar agentes**: Todos los roles de agentes se desactivan
-3. **Bloquear operaciones**: No pueden crear tickets ni responder
-4. **Notificar admin**: Email automático con motivo
-5. **Registrar auditoría**: Log completo de la suspensión
-
----
-
-### 7. ACTIVATE_COMPANY - Reactivar Empresa
-
-**Descripción**: Reactiva una empresa suspendida. Solo platform admins.
-
-```graphql
-mutation ActivateCompany($id: UUID!) {
-    activateCompany(id: $id) {
-        id
-        status
-        updatedAt
+    "data": {
+        "updateCompany": {
+            "id": "550e8400-e29b-41d4-a716-446655440001",
+            "name": "Tech Solutions Inc.",
+            "supportEmail": "soporte@techsolutions.com",
+            "website": "https://www.techsolutions.com",
+            "primaryColor": "#2563EB",
+            "updatedAt": "2025-10-03T12:30:00Z"
+        }
     }
 }
 ```
 
-**Efectos de Reactivación**:
-1. **Cambiar status** a "ACTIVE"
-2. **Reactivar agentes**: Restaurar roles de agentes
-3. **Restaurar operaciones**: Funcionalidad completa
-4. **Notificar admin**: Email de reactivación
-5. **Registrar auditoría**: Log de reactivación
+---
+
+## 📦 TYPES
+
+### CompanyMinimal
+
+**Descripción**: Type mínimo para selectores y referencias rápidas.
+
+**Campos:**
+```graphql
+type CompanyMinimal {
+    id: UUID!
+    companyCode: String!
+    name: String!
+    logoUrl: URL
+}
+```
+
+**Uso:**
+- Selectores de empresas
+- Referencias en otros types
+- Navbar de contexto
 
 ---
 
-## 🔒 SEGURIDAD Y PERMISOS
+### CompanyForFollowing
 
-### Matriz de Permisos por Operación
+**Descripción**: Type para explorar empresas y decidir seguirlas.
+
+**Campos:**
+```graphql
+type CompanyForFollowing {
+    id: UUID!
+    companyCode: String!
+    name: String!
+    logoUrl: URL
+    description: String
+    industry: String
+    city: String
+    country: String
+    primaryColor: HexColor
+    followersCount: Int!
+    isFollowedByMe: Boolean!
+}
+```
+
+**Campo Especial:**
+- `isFollowedByMe`: Calculado por resolver según usuario autenticado
+
+---
+
+### Company (Full)
+
+**Descripción**: Type completo con toda la información de empresa.
+
+**Secciones:**
+
+#### Identificadores
+```graphql
+id: UUID!
+companyCode: String!
+```
+
+#### Información Básica
+```graphql
+name: String!
+legalName: String
+supportEmail: Email
+phone: PhoneNumber
+website: URL
+```
+
+#### Información de Contacto
+```graphql
+contactAddress: String
+contactCity: String
+contactState: String
+contactCountry: String
+contactPostalCode: String
+```
+
+#### Información Legal
+```graphql
+taxId: String
+legalRepresentative: String
+```
+
+#### Configuración Operativa
+```graphql
+businessHours: JSON!
+timezone: String!
+```
+
+#### Branding
+```graphql
+logoUrl: URL
+faviconUrl: URL
+primaryColor: HexColor!
+secondaryColor: HexColor!
+```
+
+#### Estado
+```graphql
+status: CompanyStatus!
+settings: JSON
+```
+
+#### Admin (Sin Loops)
+```graphql
+adminId: UUID!
+adminName: String!
+adminEmail: Email!
+adminAvatar: URL
+```
+
+#### Estadísticas (Contadores)
+```graphql
+activeAgentsCount: Int!
+totalUsersCount: Int!
+totalTicketsCount: Int!
+openTicketsCount: Int!
+averageRating: Float
+categoriesCount: Int!
+macrosCount: Int!
+followersCount: Int!
+```
+
+#### Flags Contextuales
+```graphql
+isFollowedByMe: Boolean @auth
+```
+
+#### Auditoría
+```graphql
+createdAt: DateTime!
+updatedAt: DateTime!
+```
+
+---
+
+### CompanyFollowInfo
+
+**Descripción**: Información de empresa seguida CON contexto personal del usuario.
+
+**Campos:**
+```graphql
+type CompanyFollowInfo {
+    id: UUID!
+    company: CompanyMinimal!
+    followedAt: DateTime!
+    myTicketsCount: Int!
+    lastTicketCreatedAt: DateTime
+    hasUnreadAnnouncements: Boolean!
+}
+```
+
+**Uso:**
+- Query `myFollowedCompanies`
+- Dashboard personal
+
+---
+
+### CompanyRequest
+
+**Descripción**: Solicitud de empresa pendiente de aprobación.
+
+**Campos:**
+```graphql
+type CompanyRequest {
+    id: UUID!
+    requestCode: String!
+    companyName: String!
+    legalName: String
+    adminEmail: Email!
+    businessDescription: String!
+    website: URL
+    industryType: String!
+    estimatedUsers: Int
+    contactAddress: String
+    contactCity: String
+    contactCountry: String
+    contactPostalCode: String
+    taxId: String
+    status: CompanyRequestStatus!
+    reviewedById: UUID
+    reviewedByName: String
+    reviewedAt: DateTime
+    rejectionReason: String
+    createdCompanyId: UUID
+    createdCompanyName: String
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+```
+
+---
+
+### CompanyRequestApprovalResponse
+
+**Descripción**: Respuesta profesional al aprobar solicitud de empresa. Incluye mensaje descriptivo y campos limitados por seguridad.
+
+**Campos:**
+```graphql
+type CompanyRequestApprovalResponse {
+    """Siempre true si la mutation fue exitosa"""
+    success: Boolean!
+
+    """Mensaje descriptivo del resultado"""
+    message: String!
+
+    """Datos básicos de la empresa creada"""
+    company: CompanyApprovalInfo!
+
+    """Si se creó un nuevo usuario administrador"""
+    newUserCreated: Boolean!
+
+    """Email al que se envió la notificación"""
+    notificationSentTo: Email!
+}
+```
+
+**Uso:**
+- Response de `approveCompanyRequest` mutation
+- Proporciona feedback profesional al cliente
+- Expone solo campos esenciales (no internos)
+
+**Mensajes Posibles:**
+- Usuario nuevo: `"Solicitud aprobada exitosamente. Se ha creado la empresa '{company_name}' y se envió un email con las credenciales de acceso a {admin_email}."`
+- Usuario existente: `"Solicitud aprobada exitosamente. Se ha creado la empresa '{company_name}' y se asignó el rol de administrador al usuario existente."`
+
+---
+
+### CompanyApprovalInfo
+
+**Descripción**: Información limitada de empresa creada tras aprobación. NO incluye campos internos como business_hours, settings, etc.
+
+**Campos:**
+```graphql
+type CompanyApprovalInfo {
+    id: UUID!
+    companyCode: String!
+    name: String!
+    legalName: String
+    status: CompanyStatus!
+    adminId: UUID!
+    adminEmail: Email!
+    adminName: String!
+    createdAt: DateTime!
+}
+```
+
+**Uso:**
+- Anidado en `CompanyRequestApprovalResponse`
+- Versión segura del tipo `Company` sin datos sensibles
+
+**⚠️ Campos NO Incluidos (por seguridad):**
+- ❌ `business_hours` - Configuración interna
+- ❌ `settings` - Configuración interna
+- ❌ `timezone` - Configuración interna
+- ❌ `phone`, `website`, `contactAddress` - Info detallada no necesaria
+- ❌ Estadísticas (counts) - No relevantes en respuesta de aprobación
+
+---
+
+### CompanyRequestRejectionResponse
+
+**Descripción**: Respuesta profesional al rechazar solicitud de empresa.
+
+**Campos:**
+```graphql
+type CompanyRequestRejectionResponse {
+    """Siempre true si la mutation fue exitosa"""
+    success: Boolean!
+
+    """Mensaje descriptivo del resultado"""
+    message: String!
+
+    """Razón del rechazo (la misma que se proporcionó)"""
+    reason: String!
+
+    """Email al que se envió la notificación de rechazo"""
+    notificationSentTo: Email!
+
+    """Código de la solicitud rechazada"""
+    requestCode: String!
+}
+```
+
+**Uso:**
+- Response de `rejectCompanyRequest` mutation
+- Confirma que el rechazo fue procesado y notificado
+- Incluye el código de solicitud para referencia futura
+
+**Mensaje:**
+`"La solicitud de empresa '{company_name}' ha sido rechazada. Se ha enviado un email a {admin_email} con la razón del rechazo."`
+
+---
+
+## 🔢 ENUMS E INPUTS
+
+### CompanyQueryContext (Enum)
+
+**Descripción**: Define el contexto de la query `companies` para optimizar campos devueltos.
+
+```graphql
+enum CompanyQueryContext {
+    MINIMAL      # Selectores: 4 campos
+    EXPLORE      # Explorar: 11 campos
+    MANAGEMENT   # Admin: todos los campos
+    ANALYTICS    # Dashboards: + estadísticas
+}
+```
+
+---
+
+### CompanyStatus (Enum)
+
+```graphql
+enum CompanyStatus {
+    ACTIVE      # Empresa activa
+    SUSPENDED   # Empresa suspendida temporalmente
+}
+```
+
+---
+
+### CompanyRequestStatus (Enum)
+
+```graphql
+enum CompanyRequestStatus {
+    PENDING    # Pendiente de revisión
+    APPROVED   # Aprobada (empresa creada)
+    REJECTED   # Rechazada
+}
+```
+
+---
+
+### CompanyFilters (Input)
+
+**Descripción**: Filtros para query `companies`.
+
+```graphql
+input CompanyFilters {
+    status: CompanyStatus
+    industry: String
+    country: String
+    hasActiveTickets: Boolean
+    followedByMe: Boolean
+}
+```
+
+**Ejemplos de Uso:**
+
+Empresas activas con tickets abiertos:
+```json
+{
+    "status": "ACTIVE",
+    "hasActiveTickets": true
+}
+```
+
+Empresas que sigo en Bolivia:
+```json
+{
+    "followedByMe": true,
+    "country": "Bolivia"
+}
+```
+
+---
+
+### CompanyRequestInput (Input)
+
+**Descripción**: Input para solicitar nueva empresa.
+
+```graphql
+input CompanyRequestInput {
+    companyName: String!              # required, min:2, max:200
+    legalName: String                 # optional, max:250
+    adminEmail: Email!                # required, email válido
+    businessDescription: String!      # required, min:50, max:1000
+    website: URL                      # optional, URL válida
+    industryType: String!             # required, max:100
+    estimatedUsers: Int               # optional, min:1, max:10000
+    contactAddress: String            # optional, max:500
+    contactCity: String               # optional, max:100
+    contactCountry: String            # optional, max:100
+    contactPostalCode: String         # optional, max:20
+    taxId: String                     # optional, max:50
+}
+```
+
+---
+
+### CreateCompanyInput (Input)
+
+**Descripción**: Input para crear empresa directamente (solo admins).
+
+```graphql
+input CreateCompanyInput {
+    name: String!                     # required, min:2, max:200
+    legalName: String                 # optional, max:250
+    adminUserId: UUID!                # required, debe existir en users
+    supportEmail: Email               # optional, email válido
+    phone: PhoneNumber                # optional
+    website: URL                      # optional, URL válida
+    contactInfo: ContactInfoInput     # optional
+    initialConfig: CompanyConfigInput # optional
+}
+```
+
+---
+
+### UpdateCompanyInput (Input)
+
+**Descripción**: Input para actualizar empresa.
+
+```graphql
+input UpdateCompanyInput {
+    name: String                      # optional, min:2, max:200
+    legalName: String                 # optional, max:250
+    supportEmail: Email               # optional, email válido
+    phone: PhoneNumber                # optional
+    website: URL                      # optional, URL válida
+    contactInfo: ContactInfoInput     # optional
+    config: CompanyConfigInput        # optional
+    branding: CompanyBrandingInput    # optional
+}
+```
+
+---
+
+### ContactInfoInput (Input)
+
+```graphql
+input ContactInfoInput {
+    address: String                   # max:500
+    city: String                      # max:100
+    state: String                     # max:100
+    country: String                   # max:100
+    postalCode: String                # max:20
+    taxId: String                     # max:50
+    legalRepresentative: String       # max:200
+}
+```
+
+---
+
+### CompanyConfigInput (Input)
+
+```graphql
+input CompanyConfigInput {
+    businessHours: JSON               # Horarios por día
+    timezone: String                  # Zona horaria IANA
+    settings: JSON                    # Configuraciones custom
+}
+```
+
+**businessHours Format:**
+```json
+{
+    "monday": {"open": "08:00", "close": "18:00"},
+    "tuesday": {"open": "08:00", "close": "18:00"},
+    "wednesday": {"open": "08:00", "close": "18:00"},
+    "thursday": {"open": "08:00", "close": "18:00"},
+    "friday": {"open": "08:00", "close": "17:00"},
+    "saturday": null,
+    "sunday": null
+}
+```
+
+---
+
+### CompanyBrandingInput (Input)
+
+```graphql
+input CompanyBrandingInput {
+    logoUrl: URL                      # URL del logo
+    faviconUrl: URL                   # URL del favicon
+    primaryColor: HexColor            # Color primario hex
+    secondaryColor: HexColor          # Color secundario hex
+}
+```
+
+---
+
+## 🔒 PERMISOS Y AUTENTICACIÓN
+
+### Matriz de Permisos
 
 | Operación | Público | USER | AGENT | COMPANY_ADMIN | PLATFORM_ADMIN |
 |-----------|---------|------|-------|---------------|----------------|
-| publicCompanies | ✅ | ✅ | ✅ | ✅ | ✅ |
-| company | ❌ | ✅ (con rol) | ✅ (su empresa) | ✅ (su empresa) | ✅ (todas) |
-| myCompanies | ❌ | ✅ | ✅ | ✅ | ✅ |
-| companies | ❌ | ❌ | ❌ | ❌ | ✅ |
-| requestCompany | ✅ | ✅ | ✅ | ✅ | ✅ |
-| approveRequest | ❌ | ❌ | ❌ | ❌ | ✅ |
-| rejectRequest | ❌ | ❌ | ❌ | ❌ | ✅ |
-| createCompany | ❌ | ❌ | ❌ | ❌ | ✅ |
-| updateCompany | ❌ | ❌ | ❌ | ✅ (su empresa) | ✅ (todas) |
-| suspendCompany | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `companies(MINIMAL)` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `companies(EXPLORE)` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `companies(MANAGEMENT)` | ❌ | ❌ | ❌ | ✅ (su empresa) | ✅ (todas) |
+| `company(id)` | ❌ | ✅ (con permisos) | ✅ (su empresa) | ✅ (su empresa) | ✅ (todas) |
+| `myFollowedCompanies` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `isFollowingCompany` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `companyRequests` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `followCompany` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `unfollowCompany` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `requestCompany` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `approveCompanyRequest` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `rejectCompanyRequest` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `createCompany` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `updateCompany` | ❌ | ❌ | ❌ | ✅ (su empresa) | ✅ (todas) |
 
-### Rate Limiting Específico
+### Directivas de Autenticación
 
-- **requestCompany**: 3 requests/hora por IP
-- **createCompany**: 10 requests/hora por admin
-- **updateCompany**: 30 requests/hora por empresa
-
-### Validaciones de Contexto Empresarial
-
+#### @auth
 ```graphql
-# Validación automática por directivas
-query Company($id: UUID!) {
-    company(id: $id) @can(ability: "view", model: "Company", find: "id") {
-        # Solo retorna si el usuario tiene acceso
-    }
-}
+@auth                                  # Requiere autenticación
+@auth(requires: [PLATFORM_ADMIN])      # Requiere rol específico
+```
 
-mutation UpdateCompany($id: UUID!, $input: UpdateCompanyInput!) {
-    updateCompany(id: $id, input: $input)
-        @can(ability: "update", model: "Company", find: "id") {
-        # Solo ejecuta si tiene permisos
-    }
-}
+#### @can
+```graphql
+@can(ability: "view", model: "Company", find: "id")
+@can(ability: "update", model: "Company", find: "id")
+```
+
+#### @company
+```graphql
+@company(requireOwnership: true)       # Valida ownership de empresa
 ```
 
 ---
 
-## 🧪 EJEMPLOS DE USO FRONTEND
+## 🚨 CÓDIGOS DE ERROR
 
-### Hook para Gestión de Empresas
-
-```typescript
-// useCompanies.ts
-import { useQuery, useMutation } from '@apollo/client';
-import {
-    PUBLIC_COMPANIES_QUERY,
-    MY_COMPANIES_QUERY,
-    REQUEST_COMPANY_MUTATION
-} from '../graphql';
-
-export const useCompanies = () => {
-    const { data: publicCompanies, loading: publicLoading } = useQuery(
-        PUBLIC_COMPANIES_QUERY,
-        {
-            variables: { activeOnly: true, first: 50 }
-        }
-    );
-
-    const { data: myCompanies, loading: myLoading } = useQuery(
-        MY_COMPANIES_QUERY,
-        {
-            skip: !isAuthenticated // Solo si está logueado
-        }
-    );
-
-    const [requestCompany] = useMutation(REQUEST_COMPANY_MUTATION);
-
-    const handleRequestCompany = async (input: CompanyRequestInput) => {
-        try {
-            const { data } = await requestCompany({ variables: { input } });
-            return data.requestCompany;
-        } catch (error) {
-            throw error;
-        }
-    };
-
-    return {
-        publicCompanies: publicCompanies?.publicCompanies || [],
-        myCompanies: myCompanies?.myCompanies || [],
-        loading: publicLoading || myLoading,
-        requestCompany: handleRequestCompany
-    };
-};
-```
-
-### Componente Selector de Empresa
-
-```typescript
-// CompanySelector.tsx
-import React from 'react';
-import { useCompanies } from '../hooks/useCompanies';
-
-interface CompanySelectorProps {
-    onSelect: (company: CompanyPublicInfo) => void;
-    selectedCompanyId?: string;
-}
-
-export const CompanySelector: React.FC<CompanySelectorProps> = ({
-    onSelect,
-    selectedCompanyId
-}) => {
-    const { publicCompanies, loading } = useCompanies();
-
-    if (loading) {
-        return <div className="animate-pulse">Cargando empresas...</div>;
-    }
-
-    return (
-        <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">
-                Selecciona una empresa
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {publicCompanies.map((company) => (
-                    <div
-                        key={company.id}
-                        onClick={() => onSelect(company)}
-                        className={`
-                            p-4 border rounded-lg cursor-pointer transition-all
-                            ${selectedCompanyId === company.id
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300'
-                            }
-                        `}
-                    >
-                        <div className="flex items-center space-x-3">
-                            {company.logoUrl && (
-                                <img
-                                    src={company.logoUrl}
-                                    alt={`Logo ${company.name}`}
-                                    className="w-12 h-12 object-contain"
-                                />
-                            )}
-                            <div className="flex-1">
-                                <h3 className="font-medium text-gray-900">
-                                    {company.name}
-                                </h3>
-                                <p className="text-sm text-gray-500">
-                                    {company.industry} • {company.city}
-                                </p>
-                                {company.businessHoursDisplay && (
-                                    <p className="text-xs text-gray-400 mt-1">
-                                        {company.businessHoursDisplay}
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">
-                    ¿No encuentras tu empresa?{' '}
-                    <a href="/request-company" className="text-blue-600 hover:text-blue-500">
-                        Solicita que la agreguen
-                    </a>
-                </p>
-            </div>
-        </div>
-    );
-};
-```
-
----
-
-## 🚨 MANEJO DE ERRORES
-
-### Códigos de Error Específicos
+### Errores del Feature
 
 ```typescript
 enum CompanyManagementErrors {
     COMPANY_NOT_FOUND = 'COMPANY_NOT_FOUND',
-    COMPANY_NAME_EXISTS = 'COMPANY_NAME_EXISTS',
     COMPANY_SUSPENDED = 'COMPANY_SUSPENDED',
-    INVALID_COMPANY_CONTEXT = 'INVALID_COMPANY_CONTEXT',
+    ALREADY_FOLLOWING = 'ALREADY_FOLLOWING',
+    NOT_FOLLOWING = 'NOT_FOLLOWING',
+    MAX_FOLLOWS_EXCEEDED = 'MAX_FOLLOWS_EXCEEDED',
     REQUEST_ALREADY_EXISTS = 'REQUEST_ALREADY_EXISTS',
-    REQUEST_NOT_FOUND = 'REQUEST_NOT_FOUND',
-    INSUFFICIENT_COMPANY_PERMISSIONS = 'INSUFFICIENT_COMPANY_PERMISSIONS'
+    INSUFFICIENT_PERMISSIONS = 'INSUFFICIENT_PERMISSIONS',
+    INVALID_COMPANY_CODE = 'INVALID_COMPANY_CODE',
+    ADMIN_USER_NOT_FOUND = 'ADMIN_USER_NOT_FOUND',
+    REQUEST_NOT_PENDING = 'REQUEST_NOT_PENDING'
 }
 ```
 
@@ -1019,13 +2333,80 @@ enum CompanyManagementErrors {
 {
     "errors": [
         {
-            "message": "No tienes permisos para acceder a esta empresa",
+            "message": "Mensaje legible para el usuario",
             "extensions": {
-                "code": "INSUFFICIENT_COMPANY_PERMISSIONS",
-                "companyId": "cmp-001",
-                "requiredRole": "COMPANY_ADMIN"
+                "code": "ERROR_CODE",
+                "field": "campo_invalido",
+                "value": "valor_recibido",
+                "...": "metadata adicional"
             },
-            "path": ["company"]
+            "path": ["mutation", "field"]
+        }
+    ],
+    "data": null
+}
+```
+
+### Ejemplos de Errores
+
+#### Empresa No Encontrada
+```json
+{
+    "errors": [
+        {
+            "message": "Empresa no encontrada",
+            "extensions": {
+                "code": "COMPANY_NOT_FOUND",
+                "companyId": "550e8400-invalid-uuid"
+            }
+        }
+    ]
+}
+```
+
+#### Ya Siguiendo
+```json
+{
+    "errors": [
+        {
+            "message": "Ya estás siguiendo esta empresa",
+            "extensions": {
+                "code": "ALREADY_FOLLOWING",
+                "companyId": "550e8400-e29b-41d4-a716-446655440001",
+                "followedAt": "2024-08-10T09:15:00Z"
+            }
+        }
+    ]
+}
+```
+
+#### Límite Excedido
+```json
+{
+    "errors": [
+        {
+            "message": "Has alcanzado el límite de empresas que puedes seguir",
+            "extensions": {
+                "code": "MAX_FOLLOWS_EXCEEDED",
+                "currentFollows": 50,
+                "maxAllowed": 50
+            }
+        }
+    ]
+}
+```
+
+#### Permisos Insuficientes
+```json
+{
+    "errors": [
+        {
+            "message": "No tienes permisos para esta operación",
+            "extensions": {
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "requiredRole": "PLATFORM_ADMIN",
+                "currentRole": "USER"
+            }
         }
     ]
 }
@@ -1033,48 +2414,523 @@ enum CompanyManagementErrors {
 
 ---
 
-## 📊 MÉTRICAS Y ESTADÍSTICAS
+## ⏱️ RATE LIMITING
 
-### Eventos de Auditoría
+### Límites por Endpoint
 
+| Endpoint | Máximo | Ventana | Mensaje |
+|----------|--------|---------|---------|
+| `requestCompany` | 3 | 1 hora | "Solo 3 solicitudes por hora" |
+| `createCompany` | 10 | 1 hora | "Límite de creación excedido" |
+| `followCompany` | 20 | 1 hora | "Demasiados intentos de seguimiento" |
+
+### Error de Rate Limit
+
+```json
+{
+    "errors": [
+        {
+            "message": "Solo 3 solicitudes por hora",
+            "extensions": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "retryAfter": 1800,
+                "limit": 3,
+                "window": 3600
+            }
+        }
+    ]
+}
+```
+
+---
+
+## 💡 CASOS DE USO COMPLETOS
+
+### Caso 1: Selector de Empresa al Crear Ticket
+
+**Objetivo**: Mostrar lista simple de empresas para selector.
+
+**Query:**
+```graphql
+query CompaniesForTicketSelector {
+    companies(context: MINIMAL, first: 100) {
+        ... on CompanyMinimalList {
+            items {
+                id
+                name
+                logoUrl
+            }
+        }
+    }
+}
+```
+
+**UI Implementation:**
+- Select/Combobox con búsqueda
+- Mostrar logo + nombre
+- Cache agresivo (5 min)
+
+---
+
+### Caso 2: Explorar Empresas para Seguir
+
+**Objetivo**: Página donde usuarios descubren y siguen empresas.
+
+**1. Cargar Empresas:**
+```graphql
+query ExploreCompanies($filters: CompanyFilters) {
+    companies(context: EXPLORE, filters: $filters, first: 20) {
+        ... on CompanyExploreList {
+            items {
+                id
+                name
+                logoUrl
+                description
+                industry
+                city
+                followersCount
+                isFollowedByMe
+            }
+            hasNextPage
+        }
+    }
+}
+```
+
+**2. Seguir Empresa:**
+```graphql
+mutation FollowCompany($companyId: UUID!) {
+    followCompany(companyId: $companyId) {
+        success
+        message
+        followedAt
+    }
+}
+```
+
+**3. Actualizar UI:**
+- Cambiar botón "Seguir" → "Siguiendo"
+- Incrementar contador de seguidores
+- Agregar a lista personal
+
+---
+
+### Caso 3: Dashboard Personal (Mis Empresas Seguidas)
+
+**Objetivo**: Ver empresas que sigo con mi actividad.
+
+**Query:**
+```graphql
+query MyDashboard {
+    myFollowedCompanies {
+        id
+        company {
+            id
+            name
+            logoUrl
+        }
+        followedAt
+        myTicketsCount
+        lastTicketCreatedAt
+        hasUnreadAnnouncements
+    }
+}
+```
+
+**UI:**
+- Tarjetas de empresas
+- Badge de tickets sin leer
+- Indicador de anuncios nuevos
+- Link a tickets de cada empresa
+
+---
+
+### Caso 4: Solicitud Pública de Empresa
+
+**Objetivo**: Cualquier persona puede solicitar agregar su empresa.
+
+**1. Enviar Solicitud:**
+```graphql
+mutation RequestNewCompany($input: CompanyRequestInput!) {
+    requestCompany(input: $input) {
+        requestCode
+        status
+        createdAt
+    }
+}
+```
+
+**2. Mensaje de Éxito:**
+"Tu solicitud **REQ-2025-00043** fue enviada exitosamente. La revisaremos en 24-48 horas y te notificaremos por email."
+
+---
+
+### Caso 5: Panel Admin - Revisar Solicitudes
+
+**Objetivo**: Admin revisa y aprueba/rechaza solicitudes con feedback profesional.
+
+**1. Ver Pendientes:**
+```graphql
+query PendingRequests {
+    companyRequests(status: PENDING) {
+        id
+        requestCode
+        companyName
+        adminEmail
+        businessDescription
+        industryType
+        estimatedUsers
+        createdAt
+    }
+}
+```
+
+**2. Aprobar Solicitud (Usuario Nuevo):**
+```graphql
+mutation ApproveRequest($requestId: UUID!) {
+    approveCompanyRequest(requestId: $requestId) {
+        success
+        message
+        company {
+            id
+            companyCode
+            name
+            adminEmail
+        }
+        newUserCreated
+        notificationSentTo
+    }
+}
+```
+
+**Response:**
+```json
+{
+    "data": {
+        "approveCompanyRequest": {
+            "success": true,
+            "message": "Solicitud aprobada exitosamente. Se ha creado la empresa 'Innovación Digital SRL' y se envió un email con las credenciales de acceso a admin@innovaciondigital.bo.",
+            "company": {
+                "id": "550e8400-...",
+                "companyCode": "CMP-2025-00042",
+                "name": "Innovación Digital SRL",
+                "adminEmail": "admin@innovaciondigital.bo"
+            },
+            "newUserCreated": true,
+            "notificationSentTo": "admin@innovaciondigital.bo"
+        }
+    }
+}
+```
+
+**Proceso en Background:**
+1. ✅ Usuario creado con contraseña temporal (16 chars, expira en 7 días)
+2. ✅ Empresa creada con business_hours por defecto
+3. ✅ Rol COMPANY_ADMIN asignado
+4. ✅ Email enviado con credenciales a Mailpit
+5. ✅ Job encolado en 'emails' queue
+
+**3. Rechazar Solicitud:**
+```graphql
+mutation RejectRequest($requestId: UUID!, $reason: String!) {
+    rejectCompanyRequest(requestId: $requestId, reason: $reason) {
+        success
+        message
+        reason
+        notificationSentTo
+        requestCode
+    }
+}
+```
+
+**Response:**
+```json
+{
+    "data": {
+        "rejectCompanyRequest": {
+            "success": true,
+            "message": "La solicitud de empresa 'Innovación Digital SRL' ha sido rechazada. Se ha enviado un email a admin@innovaciondigital.bo con la razón del rechazo.",
+            "reason": "La descripción del negocio no proporciona suficiente información...",
+            "notificationSentTo": "admin@innovaciondigital.bo",
+            "requestCode": "REQ-2025-00042"
+        }
+    }
+}
+```
+
+**UI Feedback:**
+- Mostrar toast de éxito con el mensaje profesional
+- Actualizar lista de solicitudes pendientes
+- Indicar que el email fue enviado exitosamente
+
+---
+
+### Caso 6: Actualizar Branding de Empresa
+
+**Objetivo**: COMPANY_ADMIN actualiza logo y colores.
+
+**Mutation:**
+```graphql
+mutation UpdateBranding($id: UUID!, $input: UpdateCompanyInput!) {
+    updateCompany(id: $id, input: $input) {
+        logoUrl
+        primaryColor
+        secondaryColor
+        updatedAt
+    }
+}
+```
+
+**Variables:**
+```json
+{
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "input": {
+        "branding": {
+            "logoUrl": "https://cdn.example.com/new-logo.png",
+            "primaryColor": "#2563EB",
+            "secondaryColor": "#1E3A8A"
+        }
+    }
+}
+```
+
+---
+
+## 📊 EVENTOS DE AUDITORÍA
+
+Todos los eventos se registran en el sistema de auditoría:
+
+### Eventos Company
 - `company.created`: Empresa creada
 - `company.updated`: Empresa actualizada
 - `company.suspended`: Empresa suspendida
 - `company.activated`: Empresa reactivada
+
+### Eventos Request
 - `company_request.submitted`: Solicitud enviada
 - `company_request.approved`: Solicitud aprobada
 - `company_request.rejected`: Solicitud rechazada
 
-### Métricas de Sistema
+### Eventos Follow
+- `company.followed`: Usuario siguió empresa
+- `company.unfollowed`: Usuario dejó de seguir
 
-- Número total de empresas activas/suspendidas
-- Solicitudes pendientes vs tiempo promedio de aprobación
-- Distribución geográfica de empresas
-- Empresas más activas por tickets/usuarios
-- Crecimiento mensual de nuevas empresas
+**Metadata Incluida:**
+```json
+{
+    "event": "company.followed",
+    "userId": "660e8400-...",
+    "companyId": "550e8400-...",
+    "timestamp": "2025-10-03T10:45:00Z",
+    "ip": "190.186.xxx.xxx",
+    "userAgent": "Mozilla/5.0..."
+}
+```
 
 ---
 
 ## 🔄 INTEGRACIÓN CON OTROS FEATURES
 
 ### UserManagement Feature
-
-- **Roles Contextuales**: Valida company_id para AGENT y COMPANY_ADMIN
-- **CompanyBasicInfo**: Proporciona info básica sin loops infinitos
-- **User Assignments**: Gestiona asignaciones de usuarios a empresas
+- Valida `company_id` para roles `AGENT` y `COMPANY_ADMIN`
+- Proporciona `CompanyMinimal` en referencias de usuario
+- Sincroniza followers con UserCompanyRoles
 
 ### Authentication Feature
-
-- **Multi-tenant Context**: Proporciona contexto empresarial en tokens
-- **Company Branding**: Información para personalización de UI
-- **Role Validation**: Valida contexto empresarial en autenticación
+- Contexto empresarial en tokens JWT
+- Branding dinámico en login por empresa
+- Permisos basados en roles empresariales
 
 ### TicketManagement Feature
+- Todos los tickets pertenecen a una empresa
+- Solo agentes de la empresa pueden responder
+- Selector de empresa al crear ticket público
 
-- **Ticket Context**: Todos los tickets pertenecen a una empresa
-- **Agent Assignment**: Solo agentes de la empresa pueden tomar tickets
-- **Company Settings**: Configuraciones específicas de ticket por empresa
+### Notifications Feature
+- Seguidores reciben notificaciones de anuncios
+- Preferencias de notificación por empresa
+- Emails con branding de empresa
 
 ---
 
-Esta documentación cubre completamente el **CompanyManagement Feature**, proporcionando la base fundamental para el sistema multi-tenant del Helpdesk. Es crítico para que funcionen correctamente los roles de agentes y la separación de datos por empresa.
+## ⚡ OPTIMIZACIONES DE PERFORMANCE
+
+### Caché
+- **Queries MINIMAL**: 5 minutos
+- **Queries EXPLORE**: 2 minutos
+- **Company full**: Sin cache (datos dinámicos)
+
+### DataLoaders
+```php
+CompanyByIdLoader
+CompaniesByStatusLoader
+CompaniesFollowedByUserLoader
+FollowersCountLoader
+```
+
+### Indexes en Base de Datos
+```sql
+-- Companies
+CREATE INDEX idx_companies_status ON companies(status);
+CREATE INDEX idx_companies_admin_id ON companies(admin_id);
+CREATE INDEX idx_companies_company_code ON companies(company_code);
+
+-- Company Followers
+CREATE INDEX idx_company_followers_user_company ON company_followers(user_id, company_id);
+CREATE INDEX idx_company_followers_company_id ON company_followers(company_id);
+```
+
+---
+
+## 📝 CHANGELOG
+
+### V9.0 (Actual - 26 de Octubre, 2025)
+
+**Sistema de Emails y Contraseñas Temporales** - Implementación completa del flujo profesional de notificaciones
+
+#### ✨ Nuevas Funcionalidades
+
+**Sistema de Contraseñas Temporales:**
+- ✅ Migración de base de datos (`has_temporary_password`, `temporary_password_expires_at`)
+- ✅ Generación de contraseñas seguras de 16 caracteres
+- ✅ Expiración automática a los 7 días
+- ✅ Hash bcrypt para seguridad
+- ✅ Modelo User actualizado con campos y accesorios
+
+**Sistema de Emails:**
+- ✅ 3 clases Mail implementadas:
+  - `CompanyApprovalMailForNewUser` (con contraseña temporal)
+  - `CompanyApprovalMailForExistingUser` (sin contraseña)
+  - `CompanyRejectionMail` (con razón de rechazo)
+- ✅ 6 templates Blade (3 HTML + 3 texto plano)
+- ✅ 2 Jobs de email con retry (3 intentos, timeout 30s)
+- ✅ Cola 'emails' de alta prioridad
+- ✅ Integración con Mailpit para desarrollo
+
+**Eventos y Listeners:**
+- ✅ `CompanyRequestApproved` actualizado con `temporaryPassword`
+- ✅ `CompanyRequestRejected` implementado
+- ✅ Listeners para disparar jobs de email
+
+**GraphQL Responses Profesionales:**
+- ✅ `CompanyRequestApprovalResponse` - respuesta estructurada para aprobaciones
+- ✅ `CompanyApprovalInfo` - type limitado sin campos internos
+- ✅ `CompanyRequestRejectionResponse` - respuesta estructurada para rechazos
+- ✅ Mensajes descriptivos en español
+- ✅ Campos limitados por seguridad (NO expone business_hours, settings, etc.)
+
+**Configuración por Defecto:**
+- ✅ business_hours estándar (Lun-Vie 9-18) cuando no se especifica
+- ✅ Implementado en `CompanyService::create()`
+
+#### 🧪 Testing
+
+**15 Tests de Email Implementados:**
+- ✅ `ApproveCompanyRequestMutationTest`: 9 tests de aprobación
+- ✅ `RejectCompanyRequestMutationTest`: 6 tests de rechazo
+- ✅ Helper methods para integración con Mailpit API
+- ✅ Verificación de Queue dispatch a 'emails'
+- ✅ Verificación de Mail sending con clases correctas
+- ✅ Tests de login con contraseña temporal
+- ✅ Tests de expiración de contraseña
+
+**Cobertura:**
+- ✅ Escenario usuario nuevo (con contraseña)
+- ✅ Escenario usuario existente (sin contraseña)
+- ✅ Escenario de rechazo con razón
+- ✅ Validación de emails llegando a Mailpit
+
+#### 🔧 Mejoras Técnicas
+
+**Service Layer:**
+- ✅ `UserService::createFromCompanyRequest()` retorna array con user y password
+- ✅ `CompanyRequestService::approve()` maneja contraseña temporal
+- ✅ `CompanyService::create()` aplica business_hours por defecto
+
+**Mutations Actualizadas:**
+- ✅ `approveCompanyRequest`: Retorna `CompanyRequestApprovalResponse!`
+- ✅ `rejectCompanyRequest`: Retorna `CompanyRequestRejectionResponse!`
+- ✅ Mensajes profesionales en español
+- ✅ Confirmación de envío de email
+
+#### 📋 Documentación
+
+- ✅ Sección completa "Sistema de Emails y Contraseñas Temporales"
+- ✅ Diagramas de flujo de arquitectura
+- ✅ Ejemplos de contenido de emails
+- ✅ Guías de testing con Mailpit
+- ✅ Instrucciones de monitoreo y debugging
+
+#### 🐛 Fixes
+
+- ✅ User model: Fix compatibilidad con AuthenticatableTrait (`password` vs `password_hash`)
+- ✅ business_hours: Fix null default, ahora usa horario estándar
+- ✅ Missing imports: Added `use Illuminate\Support\Str` en UserService
+
+---
+
+### V8.3
+- ✅ Consolidación de queries: 9 → 5
+- ✅ Query principal con contextos
+- ✅ Eliminación de redundancia
+- ✅ Mantenibilidad mejorada
+
+### V8.2
+- Eliminación de loops infinitos
+- Queries específicas por caso de uso
+- Sistema de seguimiento
+
+### V8.0
+- Primera versión con loops
+- Arquitectura básica
+
+---
+
+## 🎯 PRÓXIMOS PASOS
+
+### ✅ Completado (V9.0)
+
+1. ✅ **Backend Completo**: Services, Resolvers, DataLoaders
+2. ✅ **Sistema de Emails**: 3 Mail classes, 6 templates Blade
+3. ✅ **Contraseñas Temporales**: Sistema completo con expiración
+4. ✅ **Tests Completos**: 15 tests de email + tests de integración
+5. ✅ **GraphQL Profesional**: Responses estructuradas con mensajes
+6. ✅ **Documentación Completa**: Sistema de emails documentado
+
+### 🔜 Pendientes
+
+1. **Frontend React:**
+   - Panel admin para revisar solicitudes
+   - UI para aprobar/rechazar con feedback visual
+   - Formulario público de solicitud de empresa
+   - Toast notifications con mensajes profesionales
+
+2. **Validación de Contraseña Temporal:**
+   - Middleware para detectar `has_temporary_password = true`
+   - Forzar cambio de contraseña en primer login
+   - UI de cambio obligatorio de contraseña
+
+3. **Email Templates Mejorados:**
+   - Branding personalizable por empresa
+   - Soporte multi-idioma (ES/EN)
+   - Templates responsive avanzados
+
+4. **Notificaciones Adicionales:**
+   - Notificación a PLATFORM_ADMIN cuando llega nueva solicitud
+   - Recordatorio de contraseña temporal próxima a expirar
+   - Email de bienvenida post-cambio de contraseña
+
+5. **Analytics:**
+   - Dashboard de solicitudes (aprobadas/rechazadas/pendientes)
+   - Métricas de tiempo de respuesta
+   - Tasas de aprobación por industria
+
+---
+
+**Fin de la Documentación V9.0**
+
+> Para más información sobre implementación backend, consulta los archivos del proyecto en:
+> - `app/Features/CompanyManagement/`
+> - `app/Features/UserManagement/` (User model con contraseñas temporales)
+> - `resources/views/emails/company/` (Templates de email)

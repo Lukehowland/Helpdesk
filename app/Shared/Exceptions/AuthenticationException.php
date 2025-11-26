@@ -3,37 +3,68 @@
 namespace App\Shared\Exceptions;
 
 /**
- * Excepción de autenticación
+ * Excepción de autenticación (401)
  *
- * Lanzada cuando un usuario no está autenticado o su token es inválido.
+ * Lanzada cuando falla la autenticación del usuario.
+ * Usada por el sistema de autenticación JWT y resolvers GraphQL.
+ *
+ * Esta excepción es específica para errores de autenticación:
+ * - Credenciales inválidas
+ * - Token JWT expirado o inválido
+ * - Usuario no encontrado
+ * - Cuenta suspendida
  */
 class AuthenticationException extends HelpdeskException
 {
     protected string $category = 'authentication';
     protected string $errorCode = 'UNAUTHENTICATED';
 
-    public static function notAuthenticated(): self
+    public static function invalidCredentials(): self
     {
-        return new self('No estás autenticado. Por favor inicia sesión.');
+        $exception = new self('Credenciales inválidas. Verifica tu email y contraseña.');
+        $exception->errorCode = 'INVALID_CREDENTIALS';
+        return $exception;
     }
 
-    public static function invalidToken(): self
+    public static function tokenExpired(): self
     {
-        return new self('Token de acceso inválido o expirado.');
+        $exception = new self('Tu sesión ha expirado. Por favor inicia sesión nuevamente.');
+        $exception->errorCode = 'TOKEN_EXPIRED';
+        return $exception;
     }
 
-    public static function sessionExpired(): self
+    public static function tokenInvalid(): self
     {
-        return new self('Tu sesión ha expirado. Por favor inicia sesión nuevamente.');
+        $exception = new self('Token de acceso inválido.');
+        $exception->errorCode = 'INVALID_TOKEN';
+        return $exception;
+    }
+
+    public static function userNotFound(): self
+    {
+        $exception = new self('Usuario no encontrado.');
+        $exception->errorCode = 'USER_NOT_FOUND';
+        return $exception;
     }
 
     public static function accountSuspended(): self
     {
-        return new self('Tu cuenta ha sido suspendida. Contacta al administrador.');
+        $exception = new self('Tu cuenta está suspendida. Contacta al administrador.');
+        $exception->errorCode = 'ACCOUNT_SUSPENDED';
+        return $exception;
     }
 
-    public static function accountDeleted(): self
+    public static function emailNotVerified(): self
     {
-        return new self('Esta cuenta ha sido eliminada.');
+        $exception = new self('Debes verificar tu email antes de continuar.');
+        $exception->errorCode = 'EMAIL_NOT_VERIFIED';
+        return $exception;
+    }
+
+    public static function unauthenticated(): self
+    {
+        $exception = new self('Unauthenticated.');
+        $exception->errorCode = 'UNAUTHENTICATED';
+        return $exception;
     }
 }
