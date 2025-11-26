@@ -8,6 +8,7 @@ use App\Shared\Helpers\DeviceInfoParser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use OpenApi\Attributes as OA;
 
 /**
  * RefreshTokenController
@@ -38,11 +39,114 @@ class RefreshTokenController
      * @param Request $request
      * @return JsonResponse
      */
+    #[OA\Post(
+        path: '/api/auth/refresh',
+        summary: 'Refresh access token',
+        description: 'Generates a new JWT access token and refresh token using a valid refresh token. The refresh token is read from an HttpOnly cookie (recommended for security), or alternatively from the X-Refresh-Token header (for testing in Swagger) or request body. This endpoint implements token rotation: the old refresh token is invalidated and a new one is generated. The new refresh token is automatically set in an HttpOnly cookie.',
+        tags: ['Authentication'],
+        parameters: [
+            new OA\Parameter(
+                name: 'X-Refresh-Token',
+                description: 'Refresh token for testing in Swagger UI. In production, the refresh token should be sent via HttpOnly cookie (automatically handled by browsers). This header takes priority over cookie and body.',
+                in: 'header',
+                required: false,
+                schema: new OA\Schema(type: 'string', example: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...')
+            ),
+        ],
+        requestBody: new OA\RequestBody(
+            description: 'Alternative method to send refresh token (not recommended for production)',
+            required: false,
+            content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(
+                        property: 'refreshToken',
+                        type: 'string',
+                        description: 'Refresh token (use only if cookie and header are not available)',
+                        example: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+                    ),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'Token refreshed successfully. New access token returned in response body. New refresh token set in HttpOnly cookie.',
+                content: new OA\JsonContent(
+                    type: 'object',
+                    properties: [
+                        new OA\Property(
+                            property: 'accessToken',
+                            type: 'string',
+                            description: 'New JWT access token for API authentication',
+                            example: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+                        ),
+                        new OA\Property(
+                            property: 'tokenType',
+                            type: 'string',
+                            description: 'Token type',
+                            example: 'Bearer'
+                        ),
+                        new OA\Property(
+                            property: 'expiresIn',
+                            type: 'integer',
+                            description: 'Access token expiration time in seconds',
+                            example: 2592000
+                        ),
+                        new OA\Property(
+                            property: 'message',
+                            type: 'string',
+                            description: 'Success message explaining that refresh token is in cookie',
+                            example: 'Token refreshed successfully. New refresh token set in HttpOnly cookie.'
+                        ),
+                    ]
+                ),
+                headers: [
+                    new OA\Header(
+                        header: 'Set-Cookie',
+                        description: 'HttpOnly cookie containing new refresh token (name: refresh_token, path: /, httpOnly: true, sameSite: strict, secure: true in production, maxAge: 43200 minutes / 30 days)',
+                        schema: new OA\Schema(
+                            type: 'string',
+                            example: 'refresh_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000'
+                        )
+                    ),
+                ]
+            ),
+            new OA\Response(
+                response: 401,
+                description: 'Unauthorized - Invalid, expired, or missing refresh token',
+                content: new OA\JsonContent(
+                    type: 'object',
+                    properties: [
+                        new OA\Property(
+                            property: 'message',
+                            type: 'string',
+                            description: 'Human-readable error message',
+                            example: 'Invalid or expired refresh token. Please login again.'
+                        ),
+                        new OA\Property(
+                            property: 'error',
+                            type: 'string',
+                            description: 'Error code for programmatic handling',
+                            enum: ['REFRESH_TOKEN_REQUIRED', 'INVALID_REFRESH_TOKEN'],
+                            example: 'INVALID_REFRESH_TOKEN'
+                        ),
+                    ]
+                )
+            ),
+        ]
+    )]
     public function refresh(Request $request): JsonResponse
     {
         try {
-            // Obtener refresh token desde cookie HttpOnly
-            $refreshToken = $request->cookie('refresh_token');
+            // Obtener refresh token de múltiples fuentes (en orden de prioridad):
+            // 1. Header X-Refresh-Token (más seguro, recomendado)
+            // 2. Cookie refresh_token (para web con HttpOnly cookies)
+            // 3. Body refreshToken (para clientes limitados)
+            // REPLICA EXACTAMENTE la lógica de RefreshTokenMutation de GraphQL
+            $refreshToken = $request->header('X-Refresh-Token')
+                ?? $request->cookie('refresh_token')
+                ?? $request->input('refreshToken')
+                ?? null;
 
             if (!$refreshToken) {
                 throw new RefreshTokenRequiredException();

@@ -91,18 +91,25 @@ trait JWTAuthenticationTrait
      */
     protected function extractJWTToken(Request $request): ?string
     {
+        // Primero intentar obtener del header Authorization (API calls)
         $header = $request->header('Authorization');
 
-        if (!$header) {
-            return null;
+        if ($header) {
+            // Remove "Bearer " prefix if present
+            if (stripos($header, 'Bearer ') === 0) {
+                return substr($header, 7);
+            }
+            return $header;
         }
 
-        // Remove "Bearer " prefix if present
-        if (stripos($header, 'Bearer ') === 0) {
-            return substr($header, 7);
+        // Si no hay header Authorization, intentar desde la cookie jwt_token
+        // (para rutas web/Blade que requieren autenticación)
+        $cookieToken = $request->cookie('jwt_token');
+        if ($cookieToken) {
+            return $cookieToken;
         }
 
-        return $header;
+        return null;
     }
 
     /**
@@ -118,7 +125,7 @@ trait JWTAuthenticationTrait
     protected function processJWTToken(Request $request, string $token): User
     {
         $tokenService = app(TokenService::class);
-        
+
         // Validate token and get payload
         $payload = $tokenService->validateAccessToken($token);
 
@@ -158,11 +165,21 @@ trait JWTAuthenticationTrait
     protected function storeAuthenticatedUser(Request $request, User $user, object $payload): void
     {
         $request->attributes->set('jwt_user', $user);
-        $request->attributes->set('jwt_payload', (array) $payload);
+        // CRITICAL FIX: Convert payload to array using json_encode/decode
+        // This handles nested stdClass objects that appear in JWT payload
+        // json_encode converts stdClass to JSON, then json_decode with assoc=true converts back to arrays
+        $payloadArray = json_decode(json_encode($payload), true);
+        $request->attributes->set('jwt_payload', $payloadArray);
         $request->attributes->set('jwt_user_id', $user->id);
 
         // CRITICAL: Also inject into request for compatibility
         $request->merge(['_authenticated_user_id' => $user->id]);
+
+        // CRITICAL: Set user resolver so $request->user() works
+        $request->setUserResolver(fn() => $user);
+
+        // CRITICAL: Also set in auth() helper for compatibility
+        auth()->setUser($user);
     }
 
     /**

@@ -2,748 +2,462 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Helpdesk System - Laravel 12 + React + Inertia.js
+## Project Overview
 
-Enterprise-grade helpdesk system built with Laravel 12 backend, React 19 frontend via Inertia.js, and GraphQL API for future mobile apps.
+**Enterprise Helpdesk System** - A professional, multi-tenant support platform built with Laravel 12, REST API, PostgreSQL 17, and AdminLTE v3. Feature-first architecture with JWT authentication, role-based access control, and comprehensive ticket management.
 
-### Tech Stack
-- **Backend**: Laravel 12 + Lighthouse GraphQL 6
-- **Frontend Web**: React 19 + Inertia.js (TypeScript available)
-- **Database**: PostgreSQL 17 (4 schemas: auth, business, ticketing, audit)
-- **Authentication**: JWT with Refresh Tokens
-- **Build Tools**: Vite 7 + TailwindCSS 4 (via @tailwindcss/vite)
-- **Development**: Docker + Docker Compose + Laravel Herd (Windows)
+**Tech Stack:**
+- **Backend:** Laravel 12, REST API (migrated from GraphQL), PostgreSQL 17 (4 schemas), Redis
+- **Frontend:** AdminLTE v3 (Blade + jQuery), Vite, Alpine.js (React/Inertia planned)
+- **Infrastructure:** Docker Compose with PHP-FPM, Nginx, PostgreSQL, Redis, Mailpit
+- **Auth:** Stateless JWT (15min access + 7 day refresh tokens)
 
-### Docker Services
-- `app` - PHP-FPM application container (Laravel)
-- `nginx` - Web server (port 8000)
-- `postgres` - PostgreSQL 17 database (port 5432)
-- `redis` - Redis cache/session store (port 6379)
-- `queue` - Laravel queue worker (background jobs)
-- `scheduler` - Laravel task scheduler (cron)
-- `mailpit` - Email testing (SMTP:1025, UI:8025)
-- `vite` - Vite development server (port 5173)
+## Critical Rules
 
-## Key Commands
+### Docker-First Development
+- **ALWAYS use Docker commands** - Never use PHP Herd or local PHP
+- **Docker is mandatory** for all operations (artisan, composer, tests, migrations)
 
-### Development Environment
+### Data Consistency
+- **ALWAYS use `description` field** - Never `initial_description` (standardized across all features)
+- This was a critical change to maintain consistency
 
-**IMPORTANT**: Commands can run either:
-- **Local PHP** (via Herd/local installation) - Faster for CPU-intensive tasks
-- **Docker** - Isolated environment, consistent across platforms
+### Route Caching
+- **ALWAYS clear route cache after adding new routes** - Routes won't be visible without this:
+  ```bash
+  docker compose exec app php artisan route:clear
+  ```
 
-**Note**: The project supports both Windows (PowerShell) and Linux environments.
+### Blade Components with jQuery
+- **NEVER use `@push('scripts')` inside `@include` partials** - It will fail silently
+- **ALWAYS check for jQuery availability** before using `$` in Blade partials
+- **ALWAYS wrap scripts in IIFE** with jQuery detection pattern (see `.cursor/rules/blade-components-jquery.mdc`)
 
-### Development Workflow
+### jQuery Validation + Select2
+- **CRITICAL:** Select2 fields don't auto-clear validation errors when changed
+- **MUST manually trigger re-validation** after Select2 change:
+  ```javascript
+  $selectField.on('change', function() {
+      // Your logic...
+      $form.validate().element('#selectFieldId'); // Force re-validation
+  });
+  ```
 
+### Form Fields
+- **ALWAYS use `name` attribute** on form inputs - jQuery Validation uses `name`, not `id`
+- Missing `name` = validation rules silently ignored
+
+## Common Commands
+
+### Docker Container Access
 ```bash
-# Start all services (Docker)
-docker compose up -d
-
-# View logs (all services)
-docker compose logs -f
-
-# View logs (specific service)
-docker compose logs -f app
-
-# Stop all services
-docker compose down
-
-# Restart specific service (needed after config changes)
-docker compose restart app queue scheduler
-```
-
-### Frontend Development
-
-```bash
-# Development with Vite HMR (Docker)
-docker compose up vite
-
-# OR run Vite locally (faster)
-npm run dev
-
-# Build for production
-docker compose exec app npm run build
-# OR locally
-npm run build
-
-# GraphQL Code Generation (generate TypeScript types from schema)
-npm run codegen              # Generate types once
-npm run codegen:watch        # Watch mode for development
-```
-
-### Laravel Artisan Commands
-
-**Choose Docker OR Local PHP** based on performance needs:
-
-```bash
-# === Docker Commands (isolated, consistent) ===
+# Execute artisan commands
 docker compose exec app php artisan [command]
 
-# === Local PHP Commands (faster, requires Herd) ===
-php artisan [command]
-powershell -Command "php artisan [command]"  # From other shells
+# Composer commands
+docker compose exec app composer [command]
+
+# Access app container shell
+docker compose exec app bash
+
+# View logs
+docker compose logs -f [service]
 ```
 
-**Common artisan commands**:
-
+### Development Workflow
 ```bash
-# Migrations
-php artisan migrate                    # Run pending migrations
-php artisan migrate:fresh --seed       # ⚠️ Reset DB with seeders
-php artisan migrate:status             # Check migration status
+# Start environment
+docker compose up -d
 
-# Seeders
-php artisan db:seed                    # Run all seeders
-php artisan db:seed --class=Features\\Authentication\\Database\\Seeders\\RolesSeeder
+# Stop environment
+docker compose down
 
-# Cache management
-php artisan optimize:clear             # Clear all caches (troubleshooting)
-php artisan config:clear               # Clear config cache
-php artisan route:clear                # Clear route cache
+# Rebuild containers (after Dockerfile changes)
+docker compose up -d --build
 
-# GraphQL
-php artisan lighthouse:validate-schema  # Validate GraphQL schema (use local PHP!)
-php artisan lighthouse:cache           # Cache schema for performance
+# View running containers
+docker compose ps
+```
 
-# Access container shell
-docker compose exec app bash
+### Database Operations
+```bash
+# Run migrations
+docker compose exec app php artisan migrate
+
+# Rollback last migration
+docker compose exec app php artisan migrate:rollback
+
+# Seed database
+docker compose exec app php artisan db:seed
+
+# Fresh migration with seed
+docker compose exec app php artisan migrate:fresh --seed
+
+# Access PostgreSQL CLI
+docker compose exec postgres psql -U helpdesk -d helpdesk
 ```
 
 ### Testing
-
-**Backend Testing (PHPUnit)**:
 ```bash
-# Run all tests (Docker)
+# Run all tests
 docker compose exec app php artisan test
 
-# Run specific feature tests
-docker compose exec app php artisan test --filter=RegisterMutationTest
+# Run specific test file
+docker compose exec app php artisan test --filter=TestClassName
 
-# Run via composer
-docker compose exec app composer test
+# Run specific test suite
+docker compose exec app php artisan test tests/Feature/Authentication
 
-# Local testing (faster)
-php artisan test
+# Run with coverage
+docker compose exec app php artisan test --coverage
+
+# Run in parallel (faster)
+docker compose exec app php artisan test --parallel
 ```
 
-**Frontend Testing (Vitest)**:
+### Cache Management
 ```bash
-# Run all frontend tests
-npm run test
+# Clear all caches
+docker compose exec app php artisan optimize:clear
 
-# Watch mode (re-run on changes)
-npm run test:watch
+# Clear specific caches
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan route:clear
+docker compose exec app php artisan view:clear
+docker compose exec app php artisan cache:clear
 
-# UI mode (interactive browser)
-npm run test:ui
+# Cache for performance (production-like)
+docker compose exec app php artisan config:cache
+docker compose exec app php artisan route:cache
+docker compose exec app php artisan view:cache
 
-# Coverage report
-npm run test:coverage
+# Optimize autoloader
+docker compose exec app composer dump-autoload -o
 ```
 
 ### Code Quality
-
 ```bash
-# Lint code with Laravel Pint (Docker)
+# Format code with Laravel Pint
 docker compose exec app ./vendor/bin/pint
 
-# Lint locally (faster)
-./vendor/bin/pint
+# Format specific file
+docker compose exec app ./vendor/bin/pint app/Features/Authentication/Services/AuthService.php
 
-# Validate GraphQL schema
-# ⚠️ IMPORTANT: Use local PHP, Docker may timeout
-powershell -Command "php artisan lighthouse:validate-schema"
-
-# Type checking (when TypeScript is configured)
-npm run type-check
+# Dry run (check without changing)
+docker compose exec app ./vendor/bin/pint --test
 ```
 
-### GraphQL Development
-
-```bash
-# Access GraphQL endpoints:
-# - GraphQL API: http://localhost:8000/graphql
-# - GraphiQL IDE: http://localhost:8000/graphiql
-# - Main app:     http://localhost:8000
-# - Mailpit UI:   http://localhost:8025
-
-# Test GraphQL query in GraphiQL:
-query {
-  ping
-  version {
-    version
-    laravel
-  }
-}
-
-# Test mutation (Register):
-mutation {
-  register(input: {
-    email: "test@example.com"
-    password: "SecurePass123!"
-    passwordConfirmation: "SecurePass123!"
-    firstName: "Test"
-    lastName: "User"
-    acceptsTerms: true
-    acceptsPrivacyPolicy: true
-  }) {
-    accessToken
-    user {
-      id
-      email
-      profile { firstName lastName }
-    }
-  }
-}
-```
-
-## Architecture: Feature-First Organization (PURE)
-
-**CRITICAL**: This project uses **Feature-First PURE** organization. ALL code for a feature lives in its folder.
-
-**ONLY EXCEPTION**: `tests/` stays in root (Laravel convention), organized by features inside.
-
-### Directory Structure
-
-```
-app/
-├── Shared/                         # Code shared between features
-│   ├── Services/                   # Shared business logic
-│   ├── GraphQL/
-│   │   ├── Scalars/               # UUID, Email, PhoneNumber, HexColor
-│   │   ├── Directives/            # @company, @audit, @rateLimit
-│   │   ├── Queries/               # ping, version, health
-│   │   ├── Mutations/             # BaseMutation (abstract class)
-│   │   └── DataLoaders/           # Shared DataLoaders (UserByIdLoader, etc.)
-│   ├── Traits/                    # HasUuid, Auditable
-│   ├── Enums/                     # UserStatus, TicketStatus
-│   ├── Exceptions/                # Custom exceptions
-│   └── Database/
-│       └── Migrations/            # Shared infrastructure (schemas, extensions)
-│
-├── Features/                       # Independent business features
-│   ├── Authentication/            # Login, registration, JWT, OAuth
-│   │   ├── Services/              # AuthService, TokenService
-│   │   ├── Models/                # User, RefreshToken
-│   │   ├── GraphQL/
-│   │   │   ├── Schema/            # authentication.graphql
-│   │   │   ├── Queries/           # AuthStatusQuery, MySessionsQuery
-│   │   │   ├── Mutations/         # LoginMutation, RegisterMutation
-│   │   │   ├── Types/             # Feature-specific types
-│   │   │   └── DataLoaders/       # Feature-specific loaders
-│   │   ├── Events/                # UserLoggedIn, UserRegistered
-│   │   ├── Listeners/             # SendLoginNotification
-│   │   ├── Jobs/                  # SendEmailVerificationJob
-│   │   ├── Policies/              # UserPolicy
-│   │   └── Database/              # ALL database related
-│   │       ├── Migrations/        # Feature migrations
-│   │       ├── Seeders/           # Feature seeders
-│   │       └── Factories/         # Feature factories
-│   │
-│   ├── UserManagement/            # User CRUD, profiles, roles
-│   │   └── (same structure)
-│   │
-│   └── CompanyManagement/         # Company CRUD, requests
-│       └── (same structure)
-│
-tests/                             # ⚠️ ONLY EXCEPTION to feature-first
-├── Feature/                       # Integration tests
-│   ├── Authentication/
-│   ├── UserManagement/
-│   └── CompanyManagement/
-└── Unit/                          # Unit tests
-    └── Services/
-
-resources/js/
-├── Pages/                         # Inertia.js pages
-│   ├── Home.tsx                   # Working homepage
-│   └── [Features]/                # Feature pages (pending)
-├── Features/                      # Frontend logic by feature
-│   ├── Authentication/
-│   ├── UserManagement/
-│   └── CompanyManagement/
-├── Components/                    # Shared UI components
-│   ├── ui/                        # Base UI components (Button, Input, etc.)
-│   ├── Skeleton/                  # Loading skeleton system (see frontend rules)
-│   ├── forms/                     # Form components
-│   ├── feedback/                  # Alert, Toast, Loading
-│   ├── navigation/                # Breadcrumb, Pagination, Tabs
-│   └── data-display/              # Avatar, StatusBadge, DataTable
-└── Shared/                        # Shared utilities and hooks
-
-graphql/
-├── schema.graphql                 # Main schema entry point
-└── shared/                        # Shared GraphQL definitions
-    ├── scalars.graphql            # UUID, Email, PhoneNumber, etc.
-    ├── directives.graphql         # @auth, @can, @company, @rateLimit, etc.
-    ├── interfaces.graphql         # Node, Timestamped, BelongsToCompany
-    ├── enums.graphql              # Role, UserStatus, CompanyStatus, etc.
-    ├── base-types.graphql         # Anti-loop types (UserBasicInfo, etc.)
-    └── pagination.graphql         # PaginatorInfo
-```
-
-### Feature-First vs Traditional Laravel
-
-**Traditional Laravel (by layers)**:
-```
-app/Models/              ← ALL models together
-app/Services/            ← ALL services together
-database/migrations/     ← ALL migrations together
-```
-
-**This Project (Feature-First)**:
-```
-app/Features/Authentication/
-  ├── Models/            ← Models for THIS feature only
-  ├── Services/          ← Services for THIS feature only
-  └── Database/
-      ├── Migrations/    ← Migrations for THIS feature only
-      ├── Seeders/       ← Seeders for THIS feature only
-      └── Factories/     ← Factories for THIS feature only
-```
-
-**Why?** All related code lives together. When working on authentication, everything is in `Features/Authentication/`.
-
-## Database Schema (PostgreSQL V7.0)
-
-**Four PostgreSQL schemas** with complete separation:
-
-- `auth` - Users, roles, authentication (13 tables)
-- `business` - Companies, requests (5 tables)
-- `ticketing` - Tickets, responses, ratings (planned)
-- `audit` - System audit logs (planned)
-
-**Key tables**:
-- `auth.users` (id, user_code, email, password_hash, status)
-- `auth.user_profiles` (user_id, first_name, last_name, phone_number, avatar_url)
-- `auth.roles` (id, role_code, name, description)
-- `business.companies` (id, company_code, name, admin_user_id, status)
-- `ticketing.tickets` (id, ticket_code, author_id, company_id, status)
-
-**Professional features**:
-- ✅ ENUM types for validation
-- ✅ INET for IP addresses
-- ✅ CITEXT for case-insensitive emails
-- ✅ JSONB for flexible data (business hours)
-- ✅ Partial indexes for performance
-- ✅ CHECK constraints for business rules
-- ✅ Triggers for automatic fields
-
-See `/documentacion/Modelado final de base de datos.txt` for complete schema.
-
-## Critical Development Rules
-
-### Backend (Laravel)
-
-**DO**:
-- ✅ Use feature-first organization (REQUIRED)
-- ✅ Put ALL business logic in Services
-- ✅ Use type hints on all functions
-- ✅ Use dependency injection
-- ✅ Use Eloquent (no raw SQL)
-- ✅ Delegate all logic from Resolvers/Controllers to Services
-
-**DON'T**:
-- ❌ NEVER put business logic in Resolvers/Controllers
-- ❌ NEVER put Migrations in root `database/` folder (use `app/Features/[Feature]/Database/Migrations/`)
-- ❌ NEVER put Models in root `app/Models/` folder (use `app/Features/[Feature]/Models/`)
-- ❌ NEVER put Seeders in root `database/seeders/` folder (use feature folders)
-- ❌ NEVER put Factories in root `database/factories/` folder (use feature folders)
-
-### Frontend (Inertia.js)
-
-**DO**:
-- ✅ Use TypeScript for all React components
-- ✅ Use Inertia forms (not Axios/fetch)
-- ✅ Use Laravel routes only (no React Router)
-- ✅ Create custom hooks for reusable logic
-- ✅ Use Inertia `<Link>` for navigation
-
-**DON'T**:
-- ❌ NEVER use React Router (incompatible with Inertia)
-- ❌ NEVER put complex logic in components
-- ❌ NEVER use fetch/axios for form submissions (use Inertia forms)
-
-### GraphQL API
-
-**DO**:
-- ✅ Use single `/graphql` endpoint only
-- ✅ Use DataLoaders to prevent N+1 queries
-- ✅ Delegate all logic to Services
-- ✅ Follow schema-first design
-- ✅ Use custom scalars (UUID, Email, PhoneNumber, HexColor)
-
-**DON'T**:
-- ❌ NEVER create multiple REST endpoints
-- ❌ NEVER simplify the schema to avoid errors (resolve the error properly)
-- ❌ NEVER skip DataLoaders for related data
-
-## Feature Migrations: Critical Setup
-
-**Feature migrations must be registered in `AppServiceProvider::boot()`:**
-
-```php
-// app/Providers/AppServiceProvider.php
-public function boot(): void
-{
-    $this->loadMigrationsFrom([
-        app_path('Shared/Database/Migrations'),
-        app_path('Features/UserManagement/Database/Migrations'),
-        app_path('Features/Authentication/Database/Migrations'),
-        app_path('Features/CompanyManagement/Database/Migrations'),
-        // Add new features here
-    ]);
-}
-```
-
-**⚠️ CRITICAL**: After adding migration paths, restart containers:
-```bash
-docker compose restart app queue scheduler
-```
-
-## GraphQL DataLoaders (N+1 Prevention)
-
-**Purpose**: Prevent N+1 query problems when fetching related data.
-
-**Location**:
-- `app/Shared/GraphQL/DataLoaders/` (shared)
-- `app/Features/[Feature]/GraphQL/DataLoaders/` (feature-specific)
-
-**Example**:
-```php
-// app/Shared/GraphQL/DataLoaders/UserByIdLoader.php
-namespace App\Shared\GraphQL\DataLoaders;
-
-use App\Features\UserManagement\Models\User;
-
-class UserByIdLoader
-{
-    public function __invoke(array $keys): array
-    {
-        $users = User::whereIn('id', $keys)->get()->keyBy('id');
-        return array_map(fn($id) => $users->get($id), $keys);
-    }
-}
-```
-
-**Usage in Resolvers**:
-```php
-public function __invoke($rootValue, array $args)
-{
-    return app(\App\Shared\GraphQL\DataLoaders\UserByIdLoader::class)
-        ->load($args['userId']);
-}
-```
-
-**When to Use**:
-- ✅ When fetching related models in GraphQL fields
-- ✅ When a field might be called multiple times in a single query
-- ✅ When implementing `author`, `company`, `creator` fields on types
-- ❌ NOT needed for simple direct queries (single record fetch)
-
-**Existing DataLoaders**:
-- `UserByIdLoader` - Load users by ID
-- `UserProfileByUserIdLoader` - Load profiles by user ID
-- `UserRolesByUserIdLoader` - Load roles by user ID
-- `CompanyByIdLoader` - Load companies by ID
-- `CompaniesByUserIdLoader` - Load companies by user ID
-- `UsersByCompanyIdLoader` - Load users by company ID
-
-## Dual Frontend Approach
-
-### Web Frontend (Inertia.js)
-- **Purpose**: Main helpdesk web application
-- **Routes**: Laravel routes (`routes/web.php`)
-- **Components**: `resources/js/Pages/`
-- **Navigation**: Inertia `<Link>` components (NO React Router)
-- **Current status**: ✅ Working (Home.tsx)
-
-### Mobile API (GraphQL)
-- **Purpose**: Future React Native mobile app
-- **Endpoint**: Single `/graphql` endpoint
-- **URLs**:
-  - API: http://localhost:8000/graphql
-  - GraphiQL: http://localhost:8000/graphiql
-- **Client**: Apollo Client (future)
-- **Status**: ✅ Lighthouse GraphQL installed and configured
-
-## Frontend UI Components
-
-**Skeleton Loading System** (`resources/js/Components/Skeleton/`):
-- **Purpose**: Professional loading states (never show blank screens)
-- **Structure**: Organized by functionality (base, forms, cards, data-display)
-- **Components**:
-  - Base: Skeleton, Input, Button, Avatar, Badge
-  - Forms: FormSkeleton, OnboardingForm
-  - Cards: Card, CardGrid, ListItem
-- **Usage**: Import from `@/Components/Skeleton/` and use during data loading
-- **Documentation**: See `Components/Skeleton/README.md` and `EXAMPLES.tsx`
-
-**Note**: See `.cursor/rules/arquitecture-frontend.mdc` for complete component organization and the skeleton system rule.
-
-## Frontend Authentication Architecture
-
-**XState v5 State Machine** (`resources/js/lib/auth/AuthMachine.ts`):
-- Manages authentication state transitions (idle → authenticating → authenticated → error)
-- Handles JWT token lifecycle (access token + refresh token)
-- Automatic token refresh before expiration
-- Session restoration on page reload via PersistenceService
-- Multi-tab synchronization via BroadcastChannel API
-
-**Key Services**:
-- `TokenManager` - JWT storage, validation, and refresh logic
-- `PersistenceService` - Persist and restore auth state from localStorage
-- `HeartbeatService` - Keep-alive mechanism for long-running sessions
-
-**Integration**:
-- `useLogin` hook - React hook for login functionality with XState machine
-- GraphQL mutations for auth operations (login, register, refresh, logout)
-- Type-safe operations via GraphQL Code Generator
-
-## GraphQL Code Generation
-
-**Configuration** (`codegen.ts`):
-- Generates TypeScript types from GraphQL schema
-- Schema source: `http://localhost:8000/graphql`
-- Output: `resources/js/types/` (client preset)
-- Watches: `resources/js/**/*.{ts,tsx}` for GraphQL operations
-
-**Generated Files**:
-- `resources/js/types/graphql.ts` - All GraphQL types
-- `resources/js/types/gql.ts` - Type-safe gql tag function
-- `resources/js/types/fragment-masking.ts` - Fragment utilities
-- `resources/js/types/index.ts` - Barrel exports
-
-**Usage Pattern**:
-```typescript
-import { gql } from '@/types/gql';
-
-const LOGIN_MUTATION = gql(`
-  mutation Login($input: LoginInput!) {
-    login(input: $input) {
-      accessToken
-      user { id email }
-    }
-  }
-`);
-```
-
-**Benefits**:
-- Full type safety between frontend and backend
-- Autocomplete for GraphQL operations
-- Compile-time error detection
-- No manual type definitions needed
-
-## Documentation References
-
-Comprehensive documentation in `/documentacion/`:
-
-**Architecture & Planning**:
-- `GUIA_ESTRUCTURA_CARPETAS_PROYECTO.md` - Complete Feature-First architecture guide (read this first!)
-- `ESTADO_COMPLETO_PROYECTO.md` - Current project state and roadmap
-
-**Feature Documentation**:
-- `AUTHENTICATION FEATURE - DOCUMENTACIÓN.txt` - Auth feature specs
-- `USER MANAGEMENT FEATURE - DOCUMENTACIÓN.txt` - User management specs
-- `COMPANY MANAGEMENT FEATURE - DOCUMENTACIÓN.txt` - Company specs
-
-**GraphQL Schemas**:
-- `AUTHENTICATION FEATURE SCHEMA.txt` - Auth GraphQL types
-- Feature schema files: `app/Features/*/GraphQL/Schema/*.graphql`
-
-**Database & Implementation**:
-- `Modelado final de base de datos.txt` - Complete database schema (V7.0)
-- `OPINION_PROFESIONAL_MODELADO_V7.md` - Database design analysis (97% score)
-
-**Implementation Guides**:
-- `GUIA_IMPLEMENTACION_REGISTER_MUTATION.md` - Example mutation implementation
-- `DATALOADERS_GUIA.md` - DataLoader implementation guide
-- `SISTEMA_ERRORES_GRAPHQL_IMPLEMENTADO.md` - Error handling system
-- `EMAIL_VERIFICATION_IMPLEMENTATION.md` - Email verification flow
-
-**Audits & Quality**:
-- `AUDITORIA_SERVICES_CORRECCION_FINAL.md` - Services audit results
-- `AUDITORIA_SERVICES_DATALOADERS_V7.md` - DataLoaders audit
-
-## Current Implementation Status
-
-**Last Updated:** 25-Oct-2025
-**Current Branch:** feature/auth-refactor
-
-### ✅ Production-Ready
-
-**Infrastructure**:
-- ✅ Laravel 12 + Docker environment
-- ✅ Inertia.js configured (Home.tsx working)
-- ✅ PostgreSQL 17 with 4 schemas
-- ✅ Redis cache/queue/sessions
-- ✅ Database 100% aligned with Modelado V7.0
-- ✅ Vitest testing framework configured
-
-**GraphQL API**:
-- ✅ Lighthouse GraphQL schema-first complete
-- ✅ 3 feature schemas (Authentication, UserManagement, CompanyManagement)
-- ✅ Scalars, Directives, Interfaces, Enums
-- ✅ Schema validated successfully
-- ✅ Error handling (DEV/PROD differentiation)
-- ✅ 6 DataLoaders implemented
-
-**Authentication Feature (100%)**:
-- ✅ Register mutation implemented & tested (100% tests passing)
-- ✅ Models: User, UserProfile, UserRole, Role, RefreshToken
-- ✅ Services: AuthService, TokenService, PasswordResetService, HeartbeatService (audited)
-- ✅ Events/Listeners: Email verification flow
-- ✅ Jobs: Email jobs (verification, password reset)
-- ✅ Migrations & Seeders complete
-- ✅ Frontend: XState v5 state machine (AuthMachine) with PersistenceService
-- ✅ Token management: JWT with automatic refresh, multi-tab synchronization
-- ✅ Session restoration: Persistent auth state across page reloads
-
-**UserManagement Feature (100%)**:
-- ✅ Models, Services, Policies (100% audited)
-- ✅ Factories and Seeders
-- ✅ Events system
-- ✅ Tests 100% passing
-
-**CompanyManagement Feature (100%)**:
-- ✅ Models: Company, CompanyRequest, CompanyFollower
-- ✅ Services: CompanyService, CompanyRequestService
-- ✅ Migrations & Factories
-- ✅ Tests 100% passing
-
-### ⏳ In Progress (feature/auth-refactor branch)
-- ⏳ Stateless JWT authentication refactoring (eliminating Laravel sessions)
-- ⏳ Frontend authentication UI with XState machine integration
-- ⏳ Additional GraphQL resolvers
-- ⏳ Company management workflows
-
-### ❌ Future Features
-- ❌ Ticketing feature
-- ❌ Audit logs activation
-- ❌ Real-time subscriptions (GraphQL)
-
-## Development Workflow
-
-1. **Read Documentation**: Start with feature docs in `/documentacion/`
-2. **Review GraphQL Schema**: Check corresponding `.graphql` files
-3. **Create Models**: With migrations in `app/Features/[Feature]/Database/Migrations/`
-4. **Register Migrations**: Add path to `AppServiceProvider::boot()`, restart containers
-5. **Create Service**: Business logic in `app/Features/[Feature]/Services/`
-6. **Implement Resolvers**: GraphQL resolvers that delegate to Services
-7. **Add Inertia Routes**: In `routes/web.php`
-8. **Create Pages**: React components in `resources/js/Pages/[Feature]/`
-9. **Write Tests**: Feature tests in `tests/Feature/[Feature]/`, Unit tests in `tests/Unit/`
-10. **Validate**: Run tests, lint code, validate GraphQL schema
-
-## Performance & Optimization
-
-**Implemented Optimizations**:
-- ✅ OPcache with optimized settings
-- ✅ PHP-FPM static pool configuration
-- ✅ Redis caching for sessions/queues
-- ✅ DataLoaders for N+1 prevention
-- ✅ Partial database indexes
-- ✅ Query optimization with Eloquent
-
-**Scripts**:
+### Performance Optimization
 ```bash
 # Run optimization script
-bash scripts/optimize-performance.sh
+./scripts/optimize-performance.sh
 
-# Deployment scripts
-bash scripts/deploy-dev.sh      # Development
-bash scripts/deploy-prod.sh     # Production
+# Manual optimization steps
+docker compose exec app php artisan config:cache
+docker compose exec app php artisan route:cache
+docker compose exec app php artisan view:cache
+docker compose exec app composer dump-autoload -o
 ```
 
-**Performance Metrics** (documented):
-- Cold start: ~500ms
-- Warm queries: ~165ms
-- Consistent performance
+## Architecture Overview
 
-## Troubleshooting
+### Feature-First Structure
+All business logic organized by feature in `app/Features/[FeatureName]/`:
 
-### GraphQL Schema Validation Timeout
-**Problem**: Schema validation times out in Docker
-**Solution**: Use local PHP (faster for CPU-intensive tasks)
+**Implemented Features:**
+- `Authentication/` - JWT auth, login, register, password reset, email verification
+- `UserManagement/` - User CRUD, profiles, roles (RBAC)
+- `CompanyManagement/` - Multi-tenant companies, requests, followers
+- `ContentManagement/` - Announcements, help center articles
+- `TicketManagement/` - Ticket system (in progress)
+
+**Feature Structure:**
+```
+app/Features/[FeatureName]/
+├── Http/
+│   ├── Controllers/     # REST endpoints (delegate to Services)
+│   ├── Requests/        # Form validation (Store/Update requests)
+│   ├── Resources/       # JSON response transformers
+│   └── Middleware/      # Feature-specific middleware
+├── Services/            # ALL business logic goes here
+├── Models/              # Eloquent models (data + relationships only)
+├── Policies/            # Authorization rules
+├── Events/              # Event classes (data only)
+├── Listeners/           # Event handlers
+├── Jobs/                # Background jobs
+├── Enums/               # Type-safe enumerations
+└── Database/
+    ├── Migrations/      # Schema changes
+    ├── Seeders/         # Test data
+    └── Factories/       # Model factories
+```
+
+### Separation of Concerns (CRITICAL)
+- **Services** → ALL business logic (create, update, delete, calculations)
+- **Controllers** → Validate input, delegate to services, return responses (no logic!)
+- **Models** → Data, relationships, scopes, casts (no business logic!)
+- **Resources** → Transform data for JSON responses
+- **Policies** → Authorization rules only
+- **Form Requests** → Validation rules and messages
+- **Events** → Data containers (no logic!)
+
+### Database: PostgreSQL Multi-Schema (97% Quality Score)
+**4 Schemas:**
+- `auth` - Users, roles, permissions, sessions, refresh tokens
+- `business` - Companies, requests, industries, followers
+- `ticketing` - Tickets, responses, categories, ratings (in progress)
+- `audit` - Audit logs (planned)
+
+**Professional Features:**
+- UUIDs as primary keys (HasUuid trait)
+- ENUM types for validation
+- INET for IP addresses
+- CITEXT for case-insensitive emails
+- JSONB for flexible data (business hours)
+- Partial indexes for performance
+- CHECK constraints for business rules
+- Soft deletes (SoftDeletes trait)
+
+### REST API Architecture
+**Centralized Routes:** All API routes in `routes/api.php` organized by feature
+
+**Naming Conventions:**
+- Routes: kebab-case (`/api/ticket-categories`)
+- JSON keys: camelCase (`userId`, `createdAt`)
+- DB tables: snake_case (`user_profiles`)
+- DB columns: snake_case (`created_at`)
+
+**Response Format:**
+```json
+{
+  "success": true,
+  "data": { ... },
+  "message": "Success message"
+}
+```
+
+**Error Format:**
+```json
+{
+  "success": false,
+  "message": "Error message",
+  "errors": { ... }
+}
+```
+
+### Frontend: AdminLTE v3 + Blade + jQuery
+**Current Implementation:** Traditional Blade views with AdminLTE v3, jQuery, Select2, DataTables
+
+**View Structure:**
+```
+resources/views/
+├── layouts/
+│   ├── app.blade.php          # Main app layout
+│   ├── public.blade.php       # Public pages layout
+│   └── partials/              # Shared partials
+├── app/
+│   └── [role]/                # Role-based views (admin, company, agent, user)
+│       └── [feature]/         # Feature views
+│           └── partials/      # Feature-specific partials
+└── public/                    # Public pages (login, register)
+```
+
+**Future:** React 19 + Inertia.js (planned migration)
+
+### AdminLTE v3 Patterns
+
+**Buttons:**
+- Primary action: `.btn .btn-primary` (solid background)
+- Secondary action: `.btn .btn-outline-dark` (border only)
+- Cancel/Discard: `.btn .btn-outline-dark` with icon
+
+**Forms:**
+- Always use `name` attribute (not just `id`) for validation
+- Use `.form-group` wrapper for each field
+- Required fields: `<span class="text-danger">*</span>` in label
+- Helper text: `<small class="form-text text-muted">`
+- Configure jQuery Validation with official AdminLTE pattern (see `.cursor/rules/adminlte-forms-validation.mdc`)
+
+**Blade Partials with jQuery:**
+- Wrap scripts in IIFE: `(function() { ... })()`
+- Check jQuery availability before using `$`
+- Add console logs for debugging
+- Use named init functions
+- Set timeout to detect if jQuery never loads
+
+## Testing
+
+**Test Database:** Separate `helpdesk_test` database (automatically created by Docker)
+
+**Configuration:**
+- Test environment: `.env.testing`
+- PHPUnit config: `phpunit.xml`
+- Uses Redis for cache/queue in tests
+- Mailpit for email testing
+
+**Test Structure:**
+```
+tests/
+├── Feature/[FeatureName]/     # Feature tests (HTTP, integration)
+└── Unit/[FeatureName]/         # Unit tests (pure logic)
+```
+
+**Best Practices:**
+- Test API endpoints in Feature tests
+- Test Services in Unit tests
+- Use factories for test data
+- Clean up after tests (transactions, DatabaseMigrations trait)
+
+## Services & Ports
+
+**Access Points:**
+- **Application:** http://localhost:8000
+- **Mailpit UI:** http://localhost:8025
+- **PostgreSQL:** localhost:5432
+- **Redis:** localhost:6379
+
+**Docker Services:**
+- `app` - PHP-FPM application
+- `nginx` - Web server
+- `postgres` - PostgreSQL 17 database
+- `redis` - Cache & session store
+- `queue` - Laravel queue worker (emails, default queues)
+- `scheduler` - Laravel task scheduler (cron)
+- `mailpit` - Email testing tool
+
+## Important Documentation
+
+**In `/documentacion/`:**
+- `ESTADO_COMPLETO_PROYECTO.md` - Complete project status
+- `GUIA_ESTRUCTURA_CARPETAS_PROYECTO.md` - Feature-first architecture guide
+- `OPINION_PROFESIONAL_MODELADO_V7.md` - Database design analysis (97% score)
+- Various endpoint documentation files
+
+**In `.cursor/rules/`:**
+- `backend-architecture.mdc` - Complete backend patterns
+- `frontend-architecture.mdc` - Frontend structure (React/Inertia planned)
+- `blade-components-jquery.mdc` - **CRITICAL** jQuery loading patterns
+- `adminlte-forms-validation.mdc` - **CRITICAL** Form validation patterns
+- `adminlte-buttons.mdc` - Button styling patterns
+
+## Type Safety
+
+**PHP 8.3:**
+- `declare(strict_types=1);` in ALL files
+- Type hint ALL parameters and returns
+- Use `final` classes by default
+- Use readonly properties where appropriate
+- Use backed enums for type safety
+
+## Authentication & Authorization
+
+**JWT Authentication:**
+- Stateless tokens (no database lookups per request)
+- Access token: 15 minutes
+- Refresh token: 7 days
+- Middleware: `JWTAuthenticationMiddleware` (optional), `JWTRequiredMiddleware` (enforce)
+
+**Roles:**
+- PLATFORM_ADMIN - Full system access
+- COMPANY_ADMIN - Company management
+- AGENT - Ticket handling
+- USER - Regular user
+
+**Authorization:**
+- Use Policies for all authorization checks
+- Controllers should call `$this->authorize('action', $model)`
+- Policies in `app/Features/[Feature]/Policies/`
+
+## Performance Features
+
+**Implemented:**
+- OPcache with optimized settings
+- Redis caching for config, routes, views
+- Stateless JWT (no DB queries per request)
+- Eager loading to prevent N+1 queries
+- Optimized Docker setup with health checks
+
+**Expected Performance:**
+- Cold start: ~200-500ms
+- Warm requests: <165ms
+
+## Common Patterns
+
+### Creating a New Feature
+1. Create feature directory: `app/Features/[FeatureName]/`
+2. Create Controller in `Http/Controllers/`
+3. Create Service in `Services/` (business logic)
+4. Create Model in `Models/`
+5. Create Policy in `Policies/`
+6. Create Form Requests in `Http/Requests/`
+7. Create Resources in `Http/Resources/`
+8. Create migration in `Database/Migrations/`
+9. Add routes in `routes/api.php`
+10. Clear route cache: `docker compose exec app php artisan route:clear`
+11. Write tests in `tests/Feature/[FeatureName]/`
+
+### Creating a REST Endpoint
+1. Create Form Request for validation
+2. Create Resource for response transformation
+3. Create Controller method (validate, delegate to service, return resource)
+4. Service method handles business logic
+5. Policy method handles authorization
+6. Add route in `routes/api.php`
+7. Clear route cache
+8. Write feature test
+
+### Creating a Blade View with Form
+1. Create view file in `resources/views/app/[role]/[feature]/`
+2. Use AdminLTE card components
+3. Add form with `name` attributes on all inputs
+4. Add helper text with `<small class="form-text text-muted">`
+5. If using partials with jQuery, follow `.cursor/rules/blade-components-jquery.mdc` pattern
+6. Configure jQuery Validation with official AdminLTE pattern
+7. For Select2 fields, add manual re-validation on change
+8. Use `.btn .btn-outline-dark` for Cancel/Discard buttons
+9. Clear view cache: `docker compose exec app php artisan view:clear`
+
+## Git Workflow
+
+**Current branch:** feature/ticket-management
+**Main branch:** master
+
+**Before committing:**
+1. Run tests: `docker compose exec app php artisan test`
+2. Format code: `docker compose exec app ./vendor/bin/pint`
+3. Clear caches if needed
+
+## Quick Troubleshooting
+
+**Routes not working:**
 ```bash
-powershell -Command "php artisan lighthouse:validate-schema"
+docker compose exec app php artisan route:clear
 ```
 
-### Migrations Not Found
-**Problem**: Feature migrations not running
-**Solution**: Register in `AppServiceProvider::boot()` and restart containers
+**Views not updating:**
 ```bash
-docker compose restart app queue scheduler
+docker compose exec app php artisan view:clear
 ```
 
-### Cache Issues
-**Problem**: Changes not reflecting
-**Solution**: Clear all caches
+**Config not updating:**
 ```bash
-php artisan optimize:clear
+docker compose exec app php artisan config:clear
 ```
 
-### Queue Jobs Not Processing
-**Problem**: Jobs stuck in queue
-**Solution**: Check queue worker logs
-```bash
-docker compose logs -f queue
-docker compose restart queue
-```
+**jQuery not working in Blade partial:**
+- Check if you're using `@push('scripts')` in `@include` (won't work!)
+- Add jQuery availability check (see `.cursor/rules/blade-components-jquery.mdc`)
 
-## Important GraphQL Principles
+**Select2 validation errors not clearing:**
+- Add `$form.validate().element('#fieldId')` in Select2 change handler
+- See `.cursor/rules/adminlte-forms-validation.mdc`
 
-### Schema-First Development
-- ❌ **NEVER** simplify the schema to avoid errors
-- ✅ **ALWAYS** resolve errors properly
-- ✅ Keep all feature schemas complete
-- ✅ Maintain anti-loop types (UserBasicInfo, CompanyBasicInfo, TicketBasicInfo)
-- ✅ Dummy resolvers return null/empty until implemented
+**Form validation not working:**
+- Check if inputs have `name` attribute (not just `id`)
+- Verify jQuery Validation Plugin is loaded
+- See `.cursor/rules/adminlte-forms-validation.mdc`
 
-### Error Handling
-**Production vs Development**:
-- **DEV**: Shows stacktrace, detailed errors
-- **PROD**: Hides sensitive data, user-friendly messages
-
-**Error Handlers** (registered in `config/lighthouse.php`):
-1. `CustomAuthenticationErrorHandler` (401)
-2. `CustomAuthorizationErrorHandler` (403)
-3. `CustomValidationErrorHandler` (422)
-4. `ReportingErrorHandler` (catch-all)
-
-See `documentacion/SISTEMA_ERRORES_GRAPHQL_IMPLEMENTADO.md` for details.
-
-## Configuration Files
-
-**Key files to understand**:
-- `config/lighthouse.php` - GraphQL configuration, namespaces, error handlers
-- `graphql/schema.graphql` - Main GraphQL schema entry point
-- `docker-compose.yml` - Docker services configuration
-- `app/Providers/AppServiceProvider.php` - Migration loading, service registration
-- `.env` - Environment configuration
-
-## Queue System
-
-**Queues configured** (priority order):
-- `emails` - High priority (email verification, password resets)
-- `default` - Standard background jobs
-
-**Queue worker** (runs in Docker):
-```bash
-php artisan queue:work redis --queue=emails,default --verbose --tries=3 --timeout=90
-```
-
-**Monitor queues**:
-```bash
-docker compose logs -f queue
-```
-
-## Additional Development Rules
-
-For comprehensive coding standards and patterns, see:
-- `.cursorrules` - Professional Cursor AI rules with detailed patterns
-- `.cursor/rules/backend-architecture.mdc` - Backend-specific architecture rules
-- `.cursor/rules/arquitecture-frontend.mdc` - Frontend-specific architecture rules
-
-These files contain detailed code patterns, naming conventions, and best practices that complement this CLAUDE.md file.
+**Tests failing:**
+- Ensure `.env.testing` is properly configured
+- Check if using correct database connection
+- Run `docker compose exec app php artisan config:clear --env=testing`

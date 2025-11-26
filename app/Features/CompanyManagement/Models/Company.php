@@ -2,6 +2,7 @@
 
 namespace App\Features\CompanyManagement\Models;
 
+use App\Features\CompanyManagement\Models\CompanyIndustry;
 use App\Features\UserManagement\Models\User;
 use App\Features\UserManagement\Models\UserRole;
 use App\Shared\Traits\HasUuid;
@@ -36,6 +37,7 @@ class Company extends Model
         'company_code',
         'name',
         'legal_name',
+        'description',
         'support_email',
         'phone',
         'website',
@@ -54,6 +56,7 @@ class Company extends Model
         'secondary_color',
         'settings',
         'status',
+        'industry_id',
         'created_from_request_id',
         'admin_user_id',
     ];
@@ -63,6 +66,7 @@ class Company extends Model
      */
     protected $casts = [
         'id' => 'string',
+        'industry_id' => 'string',
         'business_hours' => 'array',
         'settings' => 'array',
         'created_at' => 'datetime',
@@ -75,6 +79,14 @@ class Company extends Model
     public function admin(): BelongsTo
     {
         return $this->belongsTo(User::class, 'admin_user_id');
+    }
+
+    /**
+     * Obtener la industria a la que pertenece esta empresa.
+     */
+    public function industry(): BelongsTo
+    {
+        return $this->belongsTo(CompanyIndustry::class, 'industry_id');
     }
 
     /**
@@ -103,7 +115,7 @@ class Company extends Model
             'business.user_company_followers',
             'company_id',
             'user_id'
-        )->withTimestamps('followed_at');
+        )->withTimestamps('followed_at', 'followed_at');
     }
 
     /**
@@ -120,6 +132,32 @@ class Company extends Model
     public function scopeActive($query)
     {
         return $query->where('status', 'active');
+    }
+
+    /**
+     * Retrieve the model for a bound value (Route Model Binding).
+     *
+     * Throws a custom exception when the company is not found.
+     *
+     * @param  mixed  $value
+     * @param  string|null  $field
+     * @return \Illuminate\Database\Eloquent\Model|null
+     *
+     * @throws \App\Shared\Errors\ErrorWithExtensions
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        $company = $this->where($field ?? 'id', $value)->first();
+
+        if (!$company) {
+            throw \App\Shared\Errors\ErrorWithExtensions::notFound(
+                'Company not found',
+                'COMPANY_NOT_FOUND',
+                ['companyId' => $value]
+            );
+        }
+
+        return $company;
     }
 
     /**
@@ -199,21 +237,27 @@ class Company extends Model
      */
     public function getAdminNameAttribute(): string
     {
-        if (!$this->relationLoaded('admin')) {
-            $this->load('admin.profile');
-        }
+        try {
+            if (!$this->relationLoaded('admin')) {
+                $this->load('admin.profile');
+            }
 
-        $admin = $this->admin;
-        if (!$admin) {
+            $admin = $this->admin;
+            if (!$admin) {
+                return 'Unknown';
+            }
+
+            $profile = $admin->profile;
+            if (!$profile) {
+                return $admin->email ?? 'Unknown';
+            }
+
+            $firstName = $profile->first_name ?? '';
+            $lastName = $profile->last_name ?? '';
+            return trim("$firstName $lastName") ?: 'Unknown';
+        } catch (\Exception $e) {
             return 'Unknown';
         }
-
-        $profile = $admin->profile;
-        if (!$profile) {
-            return $admin->email;
-        }
-
-        return $profile->first_name . ' ' . $profile->last_name;
     }
 
     /**
@@ -234,5 +278,29 @@ class Company extends Model
     public function getAdminIdAttribute(): string
     {
         return $this->admin_user_id;
+    }
+
+    /**
+     * Obtener nombre de la industria (calculado desde la relación).
+     */
+    public function getIndustryNameAttribute(): ?string
+    {
+        if (!$this->relationLoaded('industry')) {
+            $this->load('industry');
+        }
+
+        return $this->industry?->name;
+    }
+
+    /**
+     * Obtener código de la industria (calculado desde la relación).
+     */
+    public function getIndustryCodeAttribute(): ?string
+    {
+        if (!$this->relationLoaded('industry')) {
+            $this->load('industry');
+        }
+
+        return $this->industry?->code;
     }
 }

@@ -34,9 +34,10 @@ class CompanyRequest extends Model
         'company_name',
         'legal_name',
         'admin_email',
-        'business_description',
+        'company_description',
+        'request_message',
         'website',
-        'industry_type',
+        'industry_id',
         'estimated_users',
         'contact_address',
         'contact_city',
@@ -59,6 +60,14 @@ class CompanyRequest extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * Obtener la industria de esta solicitud.
+     */
+    public function industry(): BelongsTo
+    {
+        return $this->belongsTo(CompanyIndustry::class, 'industry_id');
+    }
 
     /**
      * Obtener el usuario admin que revisó esta solicitud.
@@ -122,6 +131,20 @@ class CompanyRequest extends Model
     public function isRejected(): bool
     {
         return $this->status === 'rejected';
+    }
+
+    /**
+     * Get reviewed_at as reviewedAt (camelCase accessor)
+     */
+    public function getReviewedAtAttribute()
+    {
+        $value = $this->attributes['reviewed_at'] ?? null;
+
+        if ($value && $this->hasCast('reviewed_at', ['datetime', 'immutable_datetime'])) {
+            return $this->asDateTime($value);
+        }
+
+        return $value;
     }
 
     /**

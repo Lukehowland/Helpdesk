@@ -162,6 +162,19 @@ class User extends Model implements Authenticatable
         return $this->userRoles()->where('is_active', true);
     }
 
+    /**
+     * Obtener empresas seguidas por el usuario (relación many-to-many)
+     */
+    public function followedCompanies(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            \App\Features\CompanyManagement\Models\Company::class,
+            'business.user_company_followers',
+            'user_id',
+            'company_id'
+        )->withTimestamps('followed_at', 'followed_at');
+    }
+
     // ==================== MÉTODOS DE AUTENTICACIÓN ====================
 
     /**
@@ -186,6 +199,23 @@ class User extends Model implements Authenticatable
     public function getAuthPassword(): string
     {
         return $this->password_hash;
+    }
+
+    /**
+     * Override hasAttribute para prevenir que el trait Auditable
+     * intente setear columnas de auditoría que NO existen en la tabla users.
+     *
+     * La tabla auth.users NO tiene: created_by_id, updated_by_id, deleted_by_id
+     * Esto previene que el trait Auditable intente insertarlas durante factory creation.
+     */
+    public function hasAttribute($attribute): bool
+    {
+        // User model doesn't have auditable columns in database
+        if (in_array($attribute, ['created_by_id', 'updated_by_id', 'deleted_by_id'])) {
+            return false;
+        }
+        // Llamar al método del trait para otros atributos
+        return parent::hasAttribute($attribute);
     }
 
     // ==================== MÉTODOS DE VERIFICACIÓN ====================
@@ -295,6 +325,38 @@ class User extends Model implements Authenticatable
             ->unique()
             ->values()
             ->toArray();
+    }
+
+    /**
+     * Obtener TODOS los roles del usuario con company_id para el JWT.
+     *
+     * Retorna array de roles incluyendo company_id (null para PLATFORM_ADMIN y USER).
+     * Usado para incluir todos los roles en el token JWT.
+     *
+     * @return array Array de roles: [["code" => "COMPANY_ADMIN", "company_id" => "uuid"], ...]
+     */
+    public function getAllRolesForJWT(): array
+    {
+        $roles = $this->activeRoles()
+            ->get()
+            ->map(fn($userRole) => [
+                'code' => $userRole->role_code,
+                'company_id' => $userRole->company_id,
+            ])
+            ->values()
+            ->toArray();
+
+        // Si no tiene roles, retornar USER por defecto
+        if (empty($roles)) {
+            return [
+                [
+                    'code' => 'USER',
+                    'company_id' => null,
+                ],
+            ];
+        }
+
+        return $roles;
     }
 
     // ==================== MÉTODOS DE ACTIVIDAD ====================

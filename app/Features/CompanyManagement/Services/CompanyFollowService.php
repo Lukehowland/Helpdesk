@@ -7,7 +7,7 @@ use App\Features\CompanyManagement\Events\CompanyUnfollowed;
 use App\Features\CompanyManagement\Models\Company;
 use App\Features\CompanyManagement\Models\CompanyFollower;
 use App\Features\UserManagement\Models\User;
-use App\Shared\GraphQL\Errors\GraphQLErrorWithExtensions;
+use App\Shared\Errors\ErrorWithExtensions;
 use Illuminate\Support\Facades\DB;
 
 class CompanyFollowService
@@ -22,9 +22,18 @@ class CompanyFollowService
      */
     public function follow(User $user, Company $company): CompanyFollower
     {
+        // Verificar si la empresa está suspendida
+        if ($company->status === 'suspended') {
+            throw ErrorWithExtensions::validation(
+                'Cannot follow a suspended company',
+                'COMPANY_SUSPENDED',
+                ['companyId' => $company->id]
+            );
+        }
+
         // Verificar si ya está siguiendo
         if ($this->isFollowing($user, $company)) {
-            throw GraphQLErrorWithExtensions::validation(
+            throw ErrorWithExtensions::validation(
                 'You are already following this company',
                 'ALREADY_FOLLOWING',
                 ['companyId' => $company->id]
@@ -34,7 +43,7 @@ class CompanyFollowService
         // Verificar límite
         $currentFollows = $this->getFollowedCount($user);
         if ($currentFollows >= self::MAX_FOLLOWS) {
-            throw GraphQLErrorWithExtensions::validation(
+            throw ErrorWithExtensions::validation(
                 'You have reached the maximum number of companies you can follow',
                 'MAX_FOLLOWS_EXCEEDED',
                 [
@@ -65,7 +74,7 @@ class CompanyFollowService
     {
         // Verificar si está siguiendo
         if (!$this->isFollowing($user, $company)) {
-            throw GraphQLErrorWithExtensions::validation(
+            throw ErrorWithExtensions::validation(
                 'You are not following this company',
                 'NOT_FOLLOWING',
                 ['companyId' => $company->id]

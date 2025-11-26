@@ -16,7 +16,10 @@ return [
     |
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    // Detect if running tests (phpunit) and use 'testing' connection
+    // phpunit sets PHPUNIT_COMPOSER_INSTALL constant before loading bootstrap/app.php
+    // This ensures tests use helpdesk_test database, not production database
+    'default' => (defined('PHPUNIT_COMPOSER_INSTALL') ? 'testing' : env('DB_CONNECTION', 'sqlite')),
 
     /*
     |--------------------------------------------------------------------------
@@ -98,6 +101,20 @@ return [
             'sslmode' => 'prefer',
         ],
 
+        'testing' => [
+            'driver' => 'pgsql',
+            'host' => 'postgres',
+            'port' => 5432,
+            'database' => 'helpdesk_test',
+            'username' => 'helpdesk',
+            'password' => 'helpdesk_password',
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public,auth,business,ticketing,audit',
+            'sslmode' => 'prefer',
+        ],
+
         'sqlsrv' => [
             'driver' => 'sqlsrv',
             'url' => env('DB_URL'),
@@ -158,7 +175,10 @@ return [
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_DB', '0'),
+            // Isolate Redis by worker: cycle through available databases (0-15)
+            // TEST_TOKEN=0 → (10+0)%16=10, TEST_TOKEN=1 → (10+1)%16=11, ..., TEST_TOKEN=15 → (10+15)%16=9, TEST_TOKEN=16 → (10+16)%16=10
+            // This prevents test data pollution without exceeding Redis max DBs
+            'database' => ((int)env('REDIS_DB', '0') + (int)env('TEST_TOKEN', 0)) % 16,
             'max_retries' => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
@@ -171,7 +191,10 @@ return [
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_CACHE_DB', '1'),
+            // Isolate Redis cache by worker: cycle through available databases
+            // TEST_TOKEN=0 → (11+0)%16=11, TEST_TOKEN=1 → (11+1)%16=12, ..., TEST_TOKEN=15 → (11+15)%16=10, TEST_TOKEN=16 → (11+16)%16=11
+            // This prevents cache pollution without exceeding Redis max DBs
+            'database' => ((int)env('REDIS_CACHE_DB', '1') + (int)env('TEST_TOKEN', 0)) % 16,
             'max_retries' => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),

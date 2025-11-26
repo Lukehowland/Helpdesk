@@ -7,6 +7,7 @@ use App\Features\CompanyManagement\Models\CompanyRequest;
 use App\Features\CompanyManagement\Services\CompanyRequestService;
 use App\Features\UserManagement\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Feature\CompanyManagement\SeedsCompanyIndustries;
 use Tests\TestCase;
 
 /**
@@ -23,6 +24,7 @@ use Tests\TestCase;
 class CompanyRequestServiceTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsCompanyIndustries;
 
     private CompanyRequestService $service;
 
@@ -35,13 +37,16 @@ class CompanyRequestServiceTest extends TestCase
     /** @test */
     public function submit_creates_request_with_unique_request_code()
     {
-        // Arrange
+        // Arrange - Seed industries first
+        $this->artisan('db:seed', ['--class' => 'App\\Features\\CompanyManagement\\Database\\Seeders\\CompanyIndustrySeeder']);
+
         $data = [
             'company_name' => 'Test Company',
             'legal_name' => 'Test Company SRL',
             'admin_email' => 'admin@test.com',
-            'business_description' => 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.',
-            'industry_type' => 'Technology',
+            'company_description' => 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.',
+            'request_message' => 'We need a helpdesk system for our growing customer support needs',
+            'industry_id' => \App\Features\CompanyManagement\Models\CompanyIndustry::where('code', 'technology')->first()->id,
         ];
 
         // Act
@@ -55,22 +60,33 @@ class CompanyRequestServiceTest extends TestCase
         $this->assertNotEmpty($request->request_code);
         $this->assertMatchesRegularExpression('/^REQ-\d{4}-\d{5}$/', $request->request_code);
 
+        // Verify V8.0 fields
+        $this->assertNotNull($request->company_description);
+        $this->assertNotNull($request->request_message);
+        $this->assertNotNull($request->industry_id);
+
         $this->assertDatabaseHas('business.company_requests', [
             'id' => $request->id,
             'company_name' => 'Test Company',
             'status' => 'pending',
+            'company_description' => 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.',
         ]);
     }
 
     /** @test */
     public function approve_creates_company_user_and_assigns_role()
     {
-        // Arrange
+        // Arrange - Seed industries first
+        $this->artisan('db:seed', ['--class' => 'App\\Features\\CompanyManagement\\Database\\Seeders\\CompanyIndustrySeeder']);
+
         $reviewer = User::factory()->withRole('PLATFORM_ADMIN')->create();
+        $industryId = \App\Features\CompanyManagement\Models\CompanyIndustry::where('code', 'technology')->first()->id;
         $request = CompanyRequest::factory()->create([
             'status' => 'pending',
             'company_name' => 'New Company',
             'admin_email' => 'newadmin@company.com',
+            'company_description' => 'This company description will be transferred to the Company model upon approval',
+            'industry_id' => $industryId,
         ]);
 
         // Verificar que no existe empresa ni usuario
@@ -85,6 +101,10 @@ class CompanyRequestServiceTest extends TestCase
         $this->assertInstanceOf(Company::class, $company);
         $this->assertEquals('New Company', $company->name);
         $this->assertEquals('active', $company->status);
+
+        // Verify Company received description and industry from request
+        $this->assertEquals('This company description will be transferred to the Company model upon approval', $company->description);
+        $this->assertNotNull($company->industry_id);
 
         // Verificar que usuario fue creado
         $this->assertDatabaseHas('auth.users', [
@@ -111,12 +131,16 @@ class CompanyRequestServiceTest extends TestCase
     public function approve_uses_existing_user_if_email_exists()
     {
         // Arrange
+        $this->artisan('db:seed', ['--class' => 'App\\Features\\CompanyManagement\\Database\\Seeders\\CompanyIndustrySeeder']);
+
         $reviewer = User::factory()->withRole('PLATFORM_ADMIN')->create();
         $existingUser = User::factory()->create(['email' => 'existing@company.com']);
+        $industryId = \App\Features\CompanyManagement\Models\CompanyIndustry::inRandomOrder()->first()->id;
 
         $request = CompanyRequest::factory()->create([
             'status' => 'pending',
             'admin_email' => 'existing@company.com',
+            'industry_id' => $industryId,
         ]);
 
         $initialUserCount = User::count();
@@ -133,8 +157,11 @@ class CompanyRequestServiceTest extends TestCase
     public function approve_throws_exception_when_request_not_pending()
     {
         // Arrange
+        $this->artisan('db:seed', ['--class' => 'App\\Features\\CompanyManagement\\Database\\Seeders\\CompanyIndustrySeeder']);
+
         $reviewer = User::factory()->withRole('PLATFORM_ADMIN')->create();
-        $request = CompanyRequest::factory()->create(['status' => 'approved']);
+        $industryId = \App\Features\CompanyManagement\Models\CompanyIndustry::inRandomOrder()->first()->id;
+        $request = CompanyRequest::factory()->create(['status' => 'approved', 'industry_id' => $industryId]);
 
         // Act & Assert
         $this->expectException(\Exception::class);
@@ -147,8 +174,11 @@ class CompanyRequestServiceTest extends TestCase
     public function reject_marks_request_as_rejected_with_reason()
     {
         // Arrange
+        $this->artisan('db:seed', ['--class' => 'App\\Features\\CompanyManagement\\Database\\Seeders\\CompanyIndustrySeeder']);
+
         $reviewer = User::factory()->withRole('PLATFORM_ADMIN')->create();
-        $request = CompanyRequest::factory()->create(['status' => 'pending']);
+        $industryId = \App\Features\CompanyManagement\Models\CompanyIndustry::inRandomOrder()->first()->id;
+        $request = CompanyRequest::factory()->create(['status' => 'pending', 'industry_id' => $industryId]);
         $reason = 'Business information is insufficient';
 
         // Act
@@ -171,8 +201,11 @@ class CompanyRequestServiceTest extends TestCase
     public function reject_throws_exception_when_request_not_pending()
     {
         // Arrange
+        $this->artisan('db:seed', ['--class' => 'App\\Features\\CompanyManagement\\Database\\Seeders\\CompanyIndustrySeeder']);
+
         $reviewer = User::factory()->withRole('PLATFORM_ADMIN')->create();
-        $request = CompanyRequest::factory()->create(['status' => 'rejected']);
+        $industryId = \App\Features\CompanyManagement\Models\CompanyIndustry::inRandomOrder()->first()->id;
+        $request = CompanyRequest::factory()->create(['status' => 'rejected', 'industry_id' => $industryId]);
 
         // Act & Assert
         $this->expectException(\Exception::class);

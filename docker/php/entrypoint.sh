@@ -33,7 +33,11 @@ mkdir -p storage/logs \
          storage/app/public \
          bootstrap/cache
 
-chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+# Set permissions recursively (required after restarts on Windows)
+chmod -R 777 storage bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache
+
+echo "✅ Storage directories permissions fixed"
 
 # --- 4. Generate APP_KEY if not set ---
 if [ ! -f .env ] || grep -q "APP_KEY=$" .env; then
@@ -47,10 +51,9 @@ fi
 echo "🗄️  Running database migrations..."
 php artisan migrate --force
 
-# --- 5.1. Seed default user ---
-echo "👤 Seeding default user..."
+# --- 5.1. Seed database (roles + default user) ---
+echo "🌱 Seeding database..."
 php artisan db:seed --class="Database\\Seeders\\DatabaseSeeder" || true
-php artisan db:seed --class="App\\Features\\UserManagement\\Database\\Seeders\\DefaultUserSeeder" || true
 
 # --- 6. Clear and optimize cache ---
 echo "🧹 Clearing and optimizing cache..."

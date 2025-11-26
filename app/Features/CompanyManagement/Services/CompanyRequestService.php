@@ -10,7 +10,7 @@ use App\Features\CompanyManagement\Models\CompanyRequest;
 use App\Features\UserManagement\Models\User;
 use App\Features\UserManagement\Services\RoleService;
 use App\Features\UserManagement\Services\UserService;
-use App\Shared\GraphQL\Errors\GraphQLErrorWithExtensions;
+use App\Shared\Errors\ErrorWithExtensions;
 use App\Shared\Helpers\CodeGenerator;
 use Illuminate\Support\Facades\DB;
 
@@ -37,9 +37,10 @@ class CompanyRequestService
                 'company_name' => $data['company_name'],
                 'legal_name' => $data['legal_name'] ?? null,
                 'admin_email' => $data['admin_email'],
-                'business_description' => $data['business_description'],
+                'company_description' => $data['company_description'],
+                'request_message' => $data['request_message'],
                 'website' => $data['website'] ?? null,
-                'industry_type' => $data['industry_type'],
+                'industry_id' => $data['industry_id'],
                 'estimated_users' => $data['estimated_users'] ?? null,
                 'contact_address' => $data['contact_address'] ?? null,
                 'contact_city' => $data['contact_city'] ?? null,
@@ -73,7 +74,7 @@ class CompanyRequestService
     {
         // Validar que la solicitud esté pendiente
         if (!$request->isPending()) {
-            throw GraphQLErrorWithExtensions::validation(
+            throw ErrorWithExtensions::validation(
                 'Only pending requests can be approved',
                 'REQUEST_NOT_PENDING',
                 ['requestId' => $request->id, 'currentStatus' => $request->status]
@@ -103,6 +104,8 @@ class CompanyRequestService
             $company = $this->companyService->create([
                 'name' => $request->company_name,
                 'legal_name' => $request->legal_name,
+                'description' => $request->company_description,
+                'industry_id' => $request->industry_id,
                 'support_email' => $request->admin_email,
                 'website' => $request->website,
                 'contact_address' => $request->contact_address,
@@ -151,7 +154,7 @@ class CompanyRequestService
     {
         // Validar que la solicitud esté pendiente
         if (!$request->isPending()) {
-            throw GraphQLErrorWithExtensions::validation(
+            throw ErrorWithExtensions::validation(
                 'Only pending requests can be rejected',
                 'REQUEST_NOT_PENDING',
                 ['requestId' => $request->id, 'currentStatus' => $request->status]

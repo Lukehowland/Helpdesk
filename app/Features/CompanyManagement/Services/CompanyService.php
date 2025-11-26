@@ -9,7 +9,10 @@ use App\Features\CompanyManagement\Events\CompanyUpdated;
 use App\Features\CompanyManagement\Models\Company;
 use App\Features\UserManagement\Models\User;
 use App\Shared\Helpers\CodeGenerator;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class CompanyService
 {
@@ -38,6 +41,8 @@ class CompanyService
                 'company_code' => $companyCode,
                 'name' => $data['name'],
                 'legal_name' => $data['legal_name'] ?? null,
+                'description' => $data['description'] ?? null,
+                'industry_id' => $data['industry_id'] ?? null,
                 'admin_user_id' => $adminUser->id,
                 'support_email' => $data['support_email'] ?? null,
                 'phone' => $data['phone'] ?? null,
@@ -175,10 +180,51 @@ class CompanyService
     /**
      * Obtener todas las empresas activas.
      */
-    public function getActive(int $limit = 50): \Illuminate\Database\Eloquent\Collection
+    public function getActive(int $limit = 50, ?array $filters = null): \Illuminate\Database\Eloquent\Collection
     {
-        return Company::active()
-            ->orderBy('name')
+        $query = Company::active()
+            ->with(['admin.profile', 'industry', 'followers']);
+
+        // Aplicar filtro de industria si se proporciona
+        if (isset($filters['industry_id'])) {
+            $query->where('industry_id', $filters['industry_id']);
+        }
+
+        return $query->orderBy('name')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Obtener empresas con filtros avanzados.
+     */
+    public function index(array $filters = [], int $limit = 50): \Illuminate\Database\Eloquent\Collection
+    {
+        $query = Company::query()
+            ->with(['admin.profile', 'industry', 'followers']);
+
+        // Filtro por industria
+        if (isset($filters['industry_id'])) {
+            $query->where('industry_id', $filters['industry_id']);
+        }
+
+        // Filtro por estado
+        if (isset($filters['status'])) {
+            $query->where('status', $filters['status']);
+        } else {
+            // Por defecto solo activas
+            $query->active();
+        }
+
+        // Búsqueda por nombre
+        if (isset($filters['search'])) {
+            $query->where(function ($q) use ($filters) {
+                $q->where('name', 'ILIKE', "%{$filters['search']}%")
+                  ->orWhere('legal_name', 'ILIKE', "%{$filters['search']}%");
+            });
+        }
+
+        return $query->orderBy('name')
             ->limit($limit)
             ->get();
     }
@@ -189,5 +235,67 @@ class CompanyService
     public function isAdmin(Company $company, User $user): bool
     {
         return $company->admin_user_id === $user->id;
+    }
+
+    /**
+     * Subir archivo de logo de la empresa
+     *
+     * @param Company $company
+     * @param UploadedFile $file
+     * @return string Logo URL
+     */
+    public function uploadLogo(Company $company, UploadedFile $file): string
+    {
+        // Generar nombre único: company-logos/{companyId}/{timestamp}_{slug_filename}
+        $timestamp = now()->timestamp;
+        $originalName = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
+        $extension = $file->getClientOriginalExtension();
+        $fileName = "{$timestamp}_{$originalName}.{$extension}";
+
+        // Almacenar en disco público
+        $path = Storage::disk('public')->putFileAs(
+            "company-logos/{$company->id}",
+            $file,
+            $fileName
+        );
+
+        // Generar URL completa
+        $logoUrl = asset('storage/' . $path);
+
+        // Actualizar empresa con URL del logo
+        $company->update(['logo_url' => $logoUrl]);
+
+        return $logoUrl;
+    }
+
+    /**
+     * Subir archivo de favicon de la empresa
+     *
+     * @param Company $company
+     * @param UploadedFile $file
+     * @return string Favicon URL
+     */
+    public function uploadFavicon(Company $company, UploadedFile $file): string
+    {
+        // Generar nombre único: favicons/{companyId}/{timestamp}_{slug_filename}
+        $timestamp = now()->timestamp;
+        $originalName = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
+        $extension = $file->getClientOriginalExtension();
+        $fileName = "{$timestamp}_{$originalName}.{$extension}";
+
+        // Almacenar en disco público
+        $path = Storage::disk('public')->putFileAs(
+            "favicons/{$company->id}",
+            $file,
+            $fileName
+        );
+
+        // Generar URL completa
+        $faviconUrl = asset('storage/' . $path);
+
+        // Actualizar empresa con URL del favicon
+        $company->update(['favicon_url' => $faviconUrl]);
+
+        return $faviconUrl;
     }
 }
