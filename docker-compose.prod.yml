@@ -158,43 +158,6 @@ services:
     networks:
       - helpdesk
 
-  # ---------------------------------------------------------------------------
-  # Task Scheduler (Laravel Cron)
-  # ---------------------------------------------------------------------------
-  scheduler:
-    build:
-      context: .
-      dockerfile: docker/php/Dockerfile
-      target: production
-    container_name: helpdesk_scheduler_prod
-    restart: always
-    working_dir: /var/www
-    volumes:
-      - ./storage:/var/www/storage
-      - ./bootstrap/cache:/var/www/bootstrap/cache
-    environment:
-      - APP_ENV=production
-      - DB_HOST=postgres
-      - DB_CONNECTION=pgsql
-      - REDIS_HOST=redis
-      - CACHE_DRIVER=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      app:
-        condition: service_healthy
-    command: >
-      sh -c "while true; do
-        php artisan schedule:run >> /var/www/storage/logs/scheduler.log 2>&1
-        sleep 60
-      done"
-    networks:
-      - helpdesk
-
 # =============================================================================
 # NETWORKS
 # =============================================================================

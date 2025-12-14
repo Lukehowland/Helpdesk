@@ -165,64 +165,7 @@ services:
     # ---------------------------------------------------------------------------
     # Task Scheduler (Laravel Cron)
     # ---------------------------------------------------------------------------
-    scheduler:
-        build:
-            context: .
-            dockerfile: docker/php/Dockerfile
-            target: development
-        container_name: helpdesk_scheduler
-        restart: unless-stopped
-        working_dir: /var/www
-        volumes:
-            - .:/var/www
-            - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
-        environment:
-            - APP_ENV=local
-            - DB_HOST=postgres
-            - DB_PORT=5432
-            - DB_CONNECTION=pgsql
-            - DB_DATABASE=helpdesk
-            - DB_USERNAME=helpdesk
-            - DB_PASSWORD=helpdesk_password
-            - REDIS_HOST=redis
-            - CACHE_DRIVER=redis
-            - SESSION_DRIVER=redis
-            - QUEUE_CONNECTION=redis
-        depends_on:
-            postgres:
-                condition: service_healthy
-            redis:
-                condition: service_healthy
-            app:
-                condition: service_healthy
-        command: >
-            sh -c "while true; do
-              php artisan schedule:run >> /dev/stdout 2>&1
-              sleep 60
-            done"
-        networks:
-            - helpdesk
 
-    # ---------------------------------------------------------------------------
-    # Mailpit (Email Testing Tool)
-    # ---------------------------------------------------------------------------
-    mailpit:
-        image: axllent/mailpit:latest
-        container_name: helpdesk_mailpit
-        restart: unless-stopped
-        ports:
-            - "1025:1025"
-            - "8025:8025"
-        environment:
-            MP_SMTP_AUTH_ACCEPT_ANY: 1
-            MP_SMTP_AUTH_ALLOW_INSECURE: 1
-        networks:
-            - helpdesk
-        healthcheck:
-            test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
 
 # =============================================================================
 # NETWORKS
