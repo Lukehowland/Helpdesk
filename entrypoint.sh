@@ -17,8 +17,10 @@ sleep 3
 # ------------------------------------------------------------------------------
 # Composer install (SAFE MODE - NO ZIP)
 # ------------------------------------------------------------------------------
-if [ ! -d "vendor" ] || [ ! -f "vendor/autoload.php" ]; then
+if [ ! -d "vendor/laravel/framework" ]; then
     echo "📦 Installing Composer dependencies (safe mode)..."
+
+    rm -rf vendor
 
     composer install \
         --no-interaction \
