@@ -71,6 +71,66 @@
                 sendReminder(ticketCode);
             });
 
+            // 5. Priority Change Button
+            $('#btn-action-priority').on('click', async function () {
+                if (!currentTicket) return;
+
+                const newPriority = $('#action-priority-select').val();
+                const currentPriority = currentTicket.priority;
+
+                if (newPriority === currentPriority) {
+                    $(document).Toasts('create', {
+                        class: 'bg-warning',
+                        title: 'Sin cambios',
+                        body: 'La prioridad seleccionada es la misma que la actual.',
+                        autohide: true,
+                        delay: 2000
+                    });
+                    return;
+                }
+
+                try {
+                    const token = window.tokenManager.getAccessToken();
+                    const $btn = $(this);
+                    $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+
+                    await $.ajax({
+                        url: `/api/tickets/${currentTicket.ticket_code}`,
+                        method: 'PATCH',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        data: JSON.stringify({ priority: newPriority })
+                    });
+
+                    $(document).Toasts('create', {
+                        class: 'bg-success',
+                        title: 'Éxito',
+                        body: 'Prioridad actualizada correctamente.',
+                        autohide: true,
+                        delay: 3000
+                    });
+
+                    // Reload ticket details
+                    loadTicketDetails(currentTicket.ticket_code);
+                    $(document).trigger('tickets:refresh-list');
+
+                } catch (error) {
+                    console.error('[Ticket Detail] Priority change failed:', error);
+                    $(document).Toasts('create', {
+                        class: 'bg-danger',
+                        title: 'Error',
+                        body: error.responseJSON?.message || 'Error al cambiar la prioridad.',
+                        autohide: true,
+                        delay: 3000
+                    });
+                } finally {
+                    $('#btn-action-priority').prop('disabled', false).html('<i class="fas fa-save mr-1"></i> Aplicar');
+                }
+            });
+
             // 4. Message Sent Event (Payload Response Strategy)
             $(document).on('tickets:message-sent', function (e, data) {
                 console.log('[Ticket Detail] Message sent event received', data);
@@ -388,7 +448,7 @@
 
                 // Update Data Attributes for Modals
                 $('.btn-trigger-confirm, .btn-trigger-assign').data('ticket-code', ticket.ticket_code);
-                
+
                 // For Assign Modal, also set current agent
                 if (ticket.owner_agent_id) {
                     $('#btn-action-assign').data('current-agent-id', ticket.owner_agent_id);
@@ -397,8 +457,13 @@
                 }
 
                 // Reset visibility
-                $('#btn-action-resolve, #btn-action-close, #btn-action-reopen, #action-section-assign, #action-section-remind').addClass('d-none');
+                $('#btn-action-resolve, #btn-action-close, #btn-action-reopen, #action-section-assign, #action-section-remind, #action-section-priority').addClass('d-none');
                 $('#card-ticket-actions').removeClass('d-none'); // Ensure visible by default
+
+                // Set current priority in select
+                if (ticket.priority) {
+                    $('#action-priority-select').val(ticket.priority);
+                }
 
                 // --- USER Logic ---
                 if (role === 'USER') {
@@ -421,6 +486,9 @@
                     // Assign: Always visible
                     $('#action-section-assign').removeClass('d-none');
 
+                    // Priority: Always visible for AGENT
+                    $('#action-section-priority').removeClass('d-none');
+
                     // Remind: Always visible for AGENT
                     $('#action-section-remind').removeClass('d-none');
                 }
@@ -438,12 +506,17 @@
 
                     // Assign: Always visible
                     $('#action-section-assign').removeClass('d-none');
+
+                    // Priority: Always visible for ADMIN
+                    $('#action-section-priority').removeClass('d-none');
+
+                    // Remind: Always visible for ADMIN
+                    $('#action-section-remind').removeClass('d-none');
                 }
             }
 
             async function performAction(action, ticketCode) {
-                if (!confirm(`¿Estás seguro de querer realizar esta acción: ${action}?`)) return;
-
+                // La confirmación ya se maneja por el modal confirm-action-modal.blade.php
                 try {
                     const token = window.tokenManager.getAccessToken();
                     const url = `${endpoints[action]}${ticketCode}/${action}`; // e.g. /api/tickets/TKT-123/resolve
@@ -468,7 +541,7 @@
                     });
 
                     // Reload Ticket
-                    loadTicketDetails(currentTicket.id);
+                    loadTicketDetails(currentTicket.ticket_code);
                     // Also refresh list in background
                     $(document).trigger('tickets:refresh-list');
 
@@ -485,8 +558,7 @@
             }
 
             async function sendReminder(ticketCode) {
-                if (!confirm('¿Enviar recordatorio al creador del ticket?')) return;
-
+                // La confirmación ya se maneja por el modal confirm-action-modal.blade.php
                 try {
                     const token = window.tokenManager.getAccessToken();
                     const url = `${endpoints.remind}${ticketCode}/remind`;

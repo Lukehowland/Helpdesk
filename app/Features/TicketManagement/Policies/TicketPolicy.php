@@ -104,8 +104,11 @@ class TicketPolicy
      */
     public function close(User $user, Ticket $ticket): bool
     {
-        // Agent de la compañía puede cerrar cualquiera
-        if ($user->hasRoleInCompany('AGENT', $ticket->company_id)) {
+        // Agent o Company Admin de la compañía puede cerrar cualquiera
+        if (
+            $user->hasRoleInCompany('AGENT', $ticket->company_id)
+            || $user->hasRoleInCompany('COMPANY_ADMIN', $ticket->company_id)
+        ) {
             return true;
         }
 
@@ -132,8 +135,9 @@ class TicketPolicy
             return true;
         }
 
-        // Agent puede reabrir sin restricciones
-        return $user->hasRoleInCompany('AGENT', $ticket->company_id);
+        // Agent o Company Admin puede reabrir sin restricciones
+        return $user->hasRoleInCompany('AGENT', $ticket->company_id)
+            || $user->hasRoleInCompany('COMPANY_ADMIN', $ticket->company_id);
     }
 
     /**

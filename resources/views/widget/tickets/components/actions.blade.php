@@ -24,36 +24,26 @@
                 <i class="fas fa-exchange-alt mr-1"></i> Cambiar Estado
             </small>
             <div class="d-flex flex-column flex-sm-row flex-wrap gap-2" id="action-buttons-container">
-            <!-- Resolver: Solo OPEN o PENDING (Agent) -->
+                <!-- Resolver: Solo OPEN o PENDING (Agent) -->
                 <button type="button" class="btn btn-success d-none btn-trigger-confirm" id="btn-action-resolve"
-                        data-action="resolve"
-                        data-title="Resolver Ticket"
-                        data-message="¿Está seguro de marcar este ticket como resuelto?"
-                        data-btn-class="btn-success"
-                        data-btn-text="Resolver"
-                        title="Solo disponible en OPEN o PENDING">
+                    data-action="resolve" data-title="Resolver Ticket"
+                    data-message="¿Está seguro de marcar este ticket como resuelto?" data-btn-class="btn-success"
+                    data-btn-text="Resolver" title="Solo disponible en OPEN o PENDING">
                     <i class="fas fa-check-circle mr-1"></i> Resolver
                 </button>
 
                 <!-- Reabrir: Solo RESOLVED o CLOSED (User/Agent) -->
                 <button type="button" class="btn btn-warning d-none btn-trigger-confirm" id="btn-action-reopen"
-                        data-action="reopen"
-                        data-title="Reabrir Ticket"
-                        data-message="¿Está seguro de reabrir este ticket?"
-                        data-btn-class="btn-warning"
-                        data-btn-text="Reabrir"
-                        title="Solo disponible en RESOLVED o CLOSED">
+                    data-action="reopen" data-title="Reabrir Ticket" data-message="¿Está seguro de reabrir este ticket?"
+                    data-btn-class="btn-warning" data-btn-text="Reabrir" title="Solo disponible en RESOLVED o CLOSED">
                     <i class="fas fa-redo mr-1"></i> Reabrir
                 </button>
 
                 <!-- Cerrar: Todos menos CLOSED (User/Agent) -->
                 <button type="button" class="btn btn-secondary d-none btn-trigger-confirm" id="btn-action-close"
-                        data-action="close"
-                        data-title="Cerrar Ticket"
-                        data-message="¿Está seguro de cerrar este ticket permanentemente?"
-                        data-btn-class="btn-secondary"
-                        data-btn-text="Cerrar"
-                        title="No disponible en CLOSED">
+                    data-action="close" data-title="Cerrar Ticket"
+                    data-message="¿Está seguro de cerrar este ticket permanentemente?" data-btn-class="btn-secondary"
+                    data-btn-text="Cerrar" title="No disponible en CLOSED">
                     <i class="fas fa-times-circle mr-1"></i> Cerrar
                 </button>
             </div>
@@ -70,6 +60,23 @@
             </button>
         </div>
 
+        <!-- Cambiar Prioridad (Agent/Admin Only) -->
+        <div class="border-top pt-3 d-none" id="action-section-priority">
+            <small class="text-muted d-block mb-2">
+                <i class="fas fa-flag mr-1"></i> Cambiar Prioridad
+            </small>
+            <div class="d-flex align-items-center gap-2">
+                <select class="form-control form-control-sm" style="width: 120px;" id="action-priority-select">
+                    <option value="low">Baja</option>
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-action-priority">
+                    <i class="fas fa-save mr-1"></i> Aplicar
+                </button>
+            </div>
+        </div>
+
         <!-- Recordatorio (Agent Only) -->
         <div class="border-top pt-3 d-none" id="action-section-remind">
             <small class="text-muted d-block mb-2">
@@ -77,11 +84,9 @@
             </small>
             <!-- Enviar Recordatorio: Solo AGENT -->
             <button type="button" class="btn btn-warning btn-trigger-confirm" id="btn-action-remind"
-                    data-action="remind"
-                    data-title="Enviar Recordatorio"
-                    data-message="¿Enviar recordatorio por email al creador del ticket?"
-                    data-btn-class="btn-warning"
-                    data-btn-text="Enviar Recordatorio">
+                data-action="remind" data-title="Enviar Recordatorio"
+                data-message="¿Enviar recordatorio por email al creador del ticket?" data-btn-class="btn-warning"
+                data-btn-text="Enviar Recordatorio">
                 <i class="fas fa-envelope mr-1"></i> Enviar Recordatorio por Email
             </button>
         </div>

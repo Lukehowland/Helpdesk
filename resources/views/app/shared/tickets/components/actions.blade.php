@@ -70,6 +70,23 @@
             </button>
         </div>
 
+        <!-- Cambiar Prioridad (Agent/Admin Only) -->
+        <div class="border-top pt-3 d-none" id="action-section-priority">
+            <small class="text-muted d-block mb-2">
+                <i class="fas fa-flag mr-1"></i> Cambiar Prioridad
+            </small>
+            <div class="d-flex align-items-center gap-2">
+                <select class="form-control form-control-sm" style="width: 120px;" id="action-priority-select">
+                    <option value="low">Baja</option>
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-action-priority">
+                    <i class="fas fa-save mr-1"></i> Aplicar
+                </button>
+            </div>
+        </div>
+
         <!-- Recordatorio (Agent Only) -->
         <div class="border-top pt-3 d-none" id="action-section-remind">
             <small class="text-muted d-block mb-2">

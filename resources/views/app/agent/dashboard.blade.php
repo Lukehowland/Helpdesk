@@ -697,7 +697,7 @@
                     <i class="fas fa-file-alt fa-2x text-info"></i>
                 </div>
                 <div class="product-info">
-                    <a href="/app/agent/help-center/articles/${article.slug}" class="product-title">${article.title}</a>
+                    <span class="product-title text-dark">${article.title}</span>
                     <span class="product-description">
                         <i class="fas fa-eye mr-1"></i>${article.views || 0} vistas
                     </span>
