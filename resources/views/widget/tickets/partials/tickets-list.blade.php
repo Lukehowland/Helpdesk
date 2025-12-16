@@ -579,7 +579,8 @@
                         // Also Active only
                         currentState.filters.status = ['open', 'pending'];
                     } else if (data.value === 'awaiting_support') {
-                        currentState.filters.last_response_author_type = 'user';
+                        // Tickets donde usuario respondió último O tickets nuevos sin respuestas
+                        currentState.filters.last_response_author_type = 'user,none';
                         // Active only
                         currentState.filters.status = ['open', 'pending'];
                     } else if (data.value === 'pending_my_reply') {
@@ -605,7 +606,37 @@
             });
 
             // Initial Load
+            /**
+             * Read URL Parameters for initial filters
+             */
+            function readUrlParams() {
+                const urlParams = new URLSearchParams(window.location.search);
+
+                // Status Filter
+                if (urlParams.has('status')) {
+                    // Convert to lowercase to match internal logic
+                    const status = urlParams.get('status').toLowerCase();
+                    currentState.filters.status = status;
+                }
+
+                // Priority Filter
+                if (urlParams.has('priority')) {
+                    const priority = urlParams.get('priority').toLowerCase();
+                    currentState.filters.priority = priority;
+                    $filterPriority.val(priority);
+                }
+
+                // Search Filter
+                if (urlParams.has('search')) {
+                    const search = urlParams.get('search');
+                    currentState.filters.search = search;
+                    $searchInput.val(search);
+                }
+            }
+
+            // Initial Load
             loadFilterOptions();
+            readUrlParams(); // Read URL params before loading tickets
             loadTickets();
         }
 

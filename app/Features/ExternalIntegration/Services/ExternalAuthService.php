@@ -198,7 +198,7 @@ class ExternalAuthService
             // - Verificar si ya tiene el rol
             // - Crear el UserRole si no existe
             // - Sincronizar con Spatie
-            $user->assignRole('USER', $company->id);
+            $user->assignRole('USER', null); // USER es rol global, sin company_id
             
             \Log::info('[ExternalAuthService] Rol USER asignado/verificado', [
                 'user_id' => $user->id,
