@@ -121,7 +121,7 @@
                             Si no encontraste la respuesta a tu pregunta en nuestro Centro de Ayuda, nuestro equipo de soporte está aquí para ayudarte.
                         </p>
                         <div class="mt-3">
-                            <a href="/app/user/tickets" class="btn btn-warning btn-lg" id="create-ticket-cta">
+                            <a href="/app/user/tickets/create" class="btn btn-warning btn-lg" id="create-ticket-cta">
                                 <i class="fas fa-plus-circle mr-2"></i>Crear un ticket de soporte
                             </a>
                         </div>

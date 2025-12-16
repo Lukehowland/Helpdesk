@@ -610,7 +610,7 @@
                     <i class="fas fa-file-alt fa-2x text-info"></i>
                 </div>
                 <div class="product-info">
-                    <a href="/app/user/help-center/articles/${article.id}" class="product-title">
+                    <a href="/app/user/help-center" class="product-title">
                         ${escapeHtml(article.title)}
                         <span class="badge badge-success float-right"><i class="fas fa-eye mr-1"></i>${article.views_count}</span>
                     </a>

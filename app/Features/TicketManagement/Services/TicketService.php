@@ -287,9 +287,20 @@ class TicketService
             $query->where('created_by_user_id', $filters['created_by_user_id']);
         }
 
-        // Filtrar por last_response_author_type
+        // Filtrar por last_response_author_type (soporta valor único, array, o string separado por comas)
         if (!empty($filters['last_response_author_type'])) {
-            $query->where('last_response_author_type', $filters['last_response_author_type']);
+            $authorType = $filters['last_response_author_type'];
+            
+            // Si es string con comas, convertir a array
+            if (is_string($authorType) && str_contains($authorType, ',')) {
+                $authorType = array_map('trim', explode(',', $authorType));
+            }
+            
+            if (is_array($authorType)) {
+                $query->whereIn('last_response_author_type', $authorType);
+            } else {
+                $query->where('last_response_author_type', $authorType);
+            }
         }
 
         // Búsqueda en título, descripción, nombre de área y nombre de categoría

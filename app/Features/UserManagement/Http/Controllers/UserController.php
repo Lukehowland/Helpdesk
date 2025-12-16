@@ -31,7 +31,8 @@ class UserController extends Controller
     public function __construct(
         protected UserService $userService,
         protected ActivityLogService $activityLogService
-    ) {}
+    ) {
+    }
 
     /**
      * Get authenticated user information
@@ -111,12 +112,11 @@ class UserController extends Controller
      * - emailVerified: true/false
      * - role: USER, AGENT, COMPANY_ADMIN, PLATFORM_ADMIN
      * - companyId: UUID of company (filter users with role in that company)
-     * - recentActivity: true (active in last 7 days)
      * - createdAfter: datetime
      * - createdBefore: datetime
      *
      * Ordering:
-     * - orderBy: created_at, updated_at, email, status, last_login_at, last_activity_at
+     * - orderBy: created_at, updated_at, email, status, last_login_at
      * - order: asc, desc (default: desc)
      *
      * Authorization: PLATFORM_ADMIN, COMPANY_ADMIN, or AGENT
@@ -140,10 +140,9 @@ class UserController extends Controller
             new OA\Parameter(name: 'emailVerified', in: 'query', description: 'Filter by email verification', schema: new OA\Schema(type: 'boolean')),
             new OA\Parameter(name: 'role', in: 'query', description: 'Filter by role', schema: new OA\Schema(type: 'string', enum: ['USER', 'AGENT', 'COMPANY_ADMIN', 'PLATFORM_ADMIN'])),
             new OA\Parameter(name: 'companyId', in: 'query', description: 'Filter by company UUID', schema: new OA\Schema(type: 'string', format: 'uuid')),
-            new OA\Parameter(name: 'recentActivity', in: 'query', description: 'Filter users active in last 7 days', schema: new OA\Schema(type: 'boolean')),
             new OA\Parameter(name: 'createdAfter', in: 'query', description: 'Filter users created after datetime', schema: new OA\Schema(type: 'string', format: 'date-time')),
             new OA\Parameter(name: 'createdBefore', in: 'query', description: 'Filter users created before datetime', schema: new OA\Schema(type: 'string', format: 'date-time')),
-            new OA\Parameter(name: 'order_by', in: 'query', description: 'Order by field', schema: new OA\Schema(type: 'string', enum: ['created_at', 'updated_at', 'email', 'status', 'last_login_at', 'last_activity_at'], default: 'created_at')),
+            new OA\Parameter(name: 'order_by', in: 'query', description: 'Order by field', schema: new OA\Schema(type: 'string', enum: ['created_at', 'updated_at', 'email', 'status', 'last_login_at'], default: 'created_at')),
             new OA\Parameter(name: 'order_direction', in: 'query', description: 'Order direction', schema: new OA\Schema(type: 'string', enum: ['asc', 'desc'], default: 'desc')),
             new OA\Parameter(name: 'page', in: 'query', description: 'Page number', schema: new OA\Schema(type: 'integer', default: 1)),
             new OA\Parameter(name: 'per_page', in: 'query', description: 'Items per page (max 50)', schema: new OA\Schema(type: 'integer', default: 15)),
@@ -587,7 +586,7 @@ class UserController extends Controller
             // Filter by ACTIVE company only
             $query->whereHas('userRoles', function ($q) use ($activeCompanyId) {
                 $q->where('is_active', true)
-                  ->where('company_id', $activeCompanyId);
+                    ->where('company_id', $activeCompanyId);
             });
         }
 
@@ -596,18 +595,18 @@ class UserController extends Controller
             $search = $request->input('search');
             $query->where(function ($q) use ($search) {
                 $q->where('email', 'ILIKE', "%{$search}%")
-                  ->orWhere('user_code', 'ILIKE', "%{$search}%")
-                  ->orWhereHas('profile', function ($q) use ($search) {
-                      $q->where('first_name', 'ILIKE', "%{$search}%")
-                        ->orWhere('last_name', 'ILIKE', "%{$search}%");
-                  });
+                    ->orWhere('user_code', 'ILIKE', "%{$search}%")
+                    ->orWhereHas('profile', function ($q) use ($search) {
+                        $q->where('first_name', 'ILIKE', "%{$search}%")
+                            ->orWhere('last_name', 'ILIKE', "%{$search}%");
+                    });
             });
         }
 
         // Status filter
         if ($request->filled('status')) {
             $status = strtolower($request->input('status'));
-            
+
             if ($status === 'deleted') {
                 $query->onlyTrashed();
             } else {
@@ -626,7 +625,7 @@ class UserController extends Controller
             $roleCode = strtoupper($request->input('role'));
             $query->whereHas('userRoles', function ($q) use ($roleCode) {
                 $q->where('is_active', true)
-                  ->where('role_code', $roleCode);
+                    ->where('role_code', $roleCode);
             });
         }
 
@@ -635,17 +634,11 @@ class UserController extends Controller
             $companyId = $request->input('companyId');
             $query->whereHas('userRoles', function ($q) use ($companyId) {
                 $q->where('is_active', true)
-                  ->where('company_id', $companyId);
+                    ->where('company_id', $companyId);
             });
         }
 
-        // Recent activity filter (last 7 days)
-        if ($request->filled('recentActivity')) {
-            $recentActivity = filter_var($request->input('recentActivity'), FILTER_VALIDATE_BOOLEAN);
-            if ($recentActivity) {
-                $query->where('last_activity_at', '>=', now()->subDays(7));
-            }
-        }
+        // recentActivity filter removed - last_activity_at column does not exist
 
         // Created after filter
         if ($request->filled('createdAfter')) {
@@ -663,7 +656,7 @@ class UserController extends Controller
     /**
      * Apply ordering to the query
      *
-     * Allowed fields: created_at, updated_at, email, status, last_login_at, last_activity_at
+     * Allowed fields: created_at, updated_at, email, status, last_login_at
      * Default: created_at DESC
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
@@ -678,7 +671,6 @@ class UserController extends Controller
             'email',
             'status',
             'last_login_at',
-            'last_activity_at',
         ];
 
         $orderBy = $request->input('order_by', 'created_at');

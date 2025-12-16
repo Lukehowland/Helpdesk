@@ -175,7 +175,7 @@
 @include('app.platform-admin.companies.partials.view-company-modal')
 @include('app.platform-admin.companies.partials.form-company-modal')
 @include('app.platform-admin.companies.partials.status-company-modal')
-@include('app.platform-admin.companies.partials.delete-company-modal')
+{{-- Delete company modal removed - backend not implemented --}}
 
 @endsection
 
@@ -523,9 +523,6 @@
                             <button class="btn btn-sm btn-warning btn-status" data-id="${company.id}" title="Estado">
                                 <i class="fas fa-ban"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger btn-delete" data-id="${company.id}" title="Eliminar">
-                                <i class="fas fa-trash"></i>
-                            </button>
                         </td>
                     </tr>
                 `;
@@ -543,9 +540,6 @@
             });
             $('.btn-status').off('click').on('click', function() {
                 Modals.openStatus($(this).data('id'));
-            });
-            $('.btn-delete').off('click').on('click', function() {
-                Modals.openDelete($(this).data('id'));
             });
         },
         
@@ -669,21 +663,6 @@
             } else {
                 Toast.error('Error al abrir modal de estado');
             }
-        },
-        
-        openDelete(companyId) {
-            const company = state.companies.find(c => c.id === companyId);
-            if (!company) {
-                Toast.error('Empresa no encontrada');
-                return;
-            }
-            state.currentCompany = company;
-            
-            if (typeof DeleteCompanyModal !== 'undefined') {
-                DeleteCompanyModal.open(company);
-            } else {
-                Toast.error('Error al abrir modal de eliminación');
-            }
         }
     };
 
@@ -791,9 +770,7 @@
             Modals.openStatus(companyId);
         });
         
-        $(document).on('openDeleteCompanyModal', function(e, companyId) {
-            Modals.openDelete(companyId);
-        });
+        // Delete company event removed - backend not implemented
         
         // Refresh on company operations
         $(document).on('companySaved', function() {
